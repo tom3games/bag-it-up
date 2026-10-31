@@ -24,6 +24,7 @@ const CUST_Y = -0.5, CUST_H = 3.0
 const QUEUE = [[0.2, -3.7], [2.75, -5.4], [4.0, -6.5], [5.1, -7.4], [6.1, -8.2]]
 const MGR_POS = [[-3.55, -6.9], [-3.3, -6.2], [-2.7, -4.7], [-1.9, -3.15]]
 const G = -22
+const LOOKUP = -0.45
 
 // ---------- 状態
 const S = {
@@ -651,6 +652,8 @@ function updateCustomers(dt) {
     else if (m > 0.3) play(c, 'walk', 0.25, 0.5 + m)   // 足踏み
     else play(c, 'idle', 0.3)
     c.mixer.update(dt)
+    // 上から見下ろすカメラなので、顔をこちらに上げる（頭のてっぺんが顔に見えないように）
+    if (c.head) c.head.rotation.x += LOOKUP
     headPos(c, _hp)
     c.anger.visible = m > 0.55 && cu.state !== 'leave'; c.anger.position.copy(_hp).add(_q.set(0.45, 0.25, 0)); c.anger.scale.setScalar(0.5 + 0.3 * m + (m > 0.8 ? Math.abs(Math.sin(S.time * 10)) * 0.2 : 0))
     c.sweat.visible = m > 0.3 && m <= 0.55 && cu.state !== 'leave'; c.sweat.position.copy(_hp).add(_q.set(-0.5, 0.1 - (S.time * 0.6 % 0.4), 0))
@@ -880,6 +883,7 @@ function updateMgr(dt) {
   else { c.g.rotation.y = lerpAngle(c.g.rotation.y, MGR.stage >= 3 ? 0.35 : 0.6, Math.min(1, dt * 5)); play(c, MGR.stage >= 3 ? 'emote-no' : 'idle', 0.3, 0.8) }
   c.g.visible = MGR.stage > 0 || dist > 0.05
   c.mixer.update(dt)
+  if (c.head) c.head.rotation.x += LOOKUP
   c.anger.visible = MGR.stage >= 2; headPos(c, _hp); c.anger.position.copy(_hp).add(_q.set(0.45, 0.25, 0)); c.anger.scale.setScalar(0.7 + Math.abs(Math.sin(S.time * 6)) * 0.15)
 }
 function gameOver() {
