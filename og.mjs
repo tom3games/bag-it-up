@@ -1,11 +1,12 @@
 // SNS用サムネ og.png（1200x630）。node og.mjs
 // 卵の上にボウリングの球、豆腐から水、後ろの客は「まだ！？」、奥のドアから店長がのぞく瞬間を左に、右にタイトルと一言
 import { chromium } from 'playwright'
+import { launch } from './_mute.mjs'
 import { spawn } from 'node:child_process'
 const ROOT = import.meta.dirname
 const server = spawn(process.execPath, ['server.mjs'], { cwd: ROOT, env: { ...process.env, PORT: '5423' } })
 await new Promise(r => setTimeout(r, 400))
-const b = await chromium.launch()
+const b = await launch(chromium)
 const p = await b.newPage({ viewport: { width: 1200, height: 630 }, locale: 'ja-JP' })
 await p.goto('http://localhost:5423/'); await p.waitForFunction(() => window.__biReady && BI.charsReady)
 await p.evaluate(() => document.fonts.ready)

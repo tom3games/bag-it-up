@@ -1,5 +1,6 @@
 // verify.mjs の共通部品。コピーして __bi を置き換え、ゲーム固有のテストを足す。node verify.mjs
 import { chromium, webkit } from 'playwright'
+import { launch } from './_mute.mjs'
 import { spawn } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
 const ROOT = import.meta.dirname
@@ -51,7 +52,7 @@ const variance = (p, sel) => p.evaluate(sel => {
 }, sel)
 const SIZES = [[360, 640, 'small'], [390, 844, 'phone'], [844, 390, 'land'], [667, 375, 'land-se'], [768, 1024, 'tab'], [1440, 900, 'pc']]
 
-const browser = await chromium.launch()
+const browser = await launch(chromium)
 const p = await open(browser)
 await t('起動時にエラーが出ない', async () => { expect(p.errs.length === 0, p.errs.join('|')) })
 await t('ブラウザの拡大が起きない（viewport・ピンチ・Ctrl+ホイール・Ctrl+プラス）', async () => {
@@ -151,12 +152,12 @@ await t('英語に切り替わる（結果・ボタン・共有文）', async ()
   await p.click('#bLang'); const r = await p.evaluate(() => ({ btn: document.getElementById('bAgain').textContent, rank: document.getElementById('rRank').textContent, share: BI.xPost().text, lang: document.documentElement.lang }))
   await p.click('#bLang'); expect(r.lang === 'en' && r.btn === 'Again' && /#BagItUp/.test(r.share) && !/[ぁ-ん]/.test(r.rank), JSON.stringify(r))
 })
-await t('音: BGM と効果音が鳴る・ミュートで止まる', async () => {
+await t('音: BGM と効果音を鳴らす関数が呼ばれる（実際には鳴らさない）・ミュートで止まる', async () => {
   await p.click('#bTitle'); await p.click('#bStart'); await p.waitForTimeout(1200)
-  const a = await p.evaluate(() => ({ played: BI.Snd.played, lv: BI.Snd.level(), ctx: BI.Snd.ctx && BI.Snd.ctx.state }))
+  const a = await p.evaluate(() => ({ played: BI.Snd.played, want: BI.Snd.want, ctx: BI.Snd.ctx && BI.Snd.ctx.state }))
   await p.click('#bMute'); await p.waitForTimeout(400); const m = await p.evaluate(() => ({ lv: BI.Snd.level(), muted: BI.Snd.muted, ls: localStorage.getItem('bi.mute') }))
   await p.click('#bMute')
-  expect(a.played['bgm:play'] && a.played.tap && a.played.beep && m.muted && m.lv === 0 && m.ls === '1', JSON.stringify({ a, m })); return Object.keys(a.played).join(',')
+  expect(a.want === 'play' && a.ctx === 'suspended' && a.played.tap && a.played.beep && m.muted && m.lv === 0 && m.ls === '1', JSON.stringify({ a, m })); return Object.keys(a.played).join(',')
 })
 await t('固定60Hz: 画面の速さに関係なく1秒=60ステップ', async () => {
   const r = await p.evaluate(async () => { const t0 = BI.S.time; await new Promise(r => setTimeout(r, 2000)); return (BI.S.time - t0) / 2 })
@@ -192,7 +193,7 @@ for (const [w, h, name] of SIZES) {
 }
 await browser.close()
 // ---- WebKit（iPhone 相当）でタッチの通し
-const wb = await webkit.launch(), wp = await open(wb, { isMobile: true, hasTouch: true, deviceScaleFactor: 2 })
+const wb = await launch(webkit), wp = await open(wb, { isMobile: true, hasTouch: true, deviceScaleFactor: 2 })
 await t('WebKit: 2本指の touchmove を止める', async () => {
   const r = await wp.evaluate(() => { const e = new Event('touchmove', { cancelable: true, bubbles: true }); Object.defineProperty(e, 'touches', { value: [{}, {}] }); document.body.dispatchEvent(e); return e.defaultPrevented })
   expect(r, r)
