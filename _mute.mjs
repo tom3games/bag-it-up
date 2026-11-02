@@ -7,6 +7,15 @@ export const MUTE_JS = () => {
     const M = class extends C { constructor(...a) { super(...a); try { C.prototype.suspend.call(this) } catch (e) {} } }
     window[k] = M
   }
+  if (window.AudioNode && window.AudioDestinationNode && !AudioNode.prototype.connect.__muted) {
+    // WebKit は --mute-audio が無いので、スピーカーへの接続を音量0の箱に差し替える（2026-11-02 WebKit から漏れた）
+    const conn = AudioNode.prototype.connect
+    AudioNode.prototype.connect = function (t, ...a) {
+      if (t instanceof AudioDestinationNode) { const c = this.context; if (!c.__silent) { c.__silent = c.createGain(); c.__silent.gain.value = 0; conn.call(c.__silent, t) } return conn.call(this, c.__silent, ...a) }
+      return conn.call(this, t, ...a)
+    }
+    AudioNode.prototype.connect.__muted = true
+  }
   const play = HTMLMediaElement.prototype.play
   HTMLMediaElement.prototype.play = function (...a) { this.muted = true; this.volume = 0; return play.apply(this, a) }
 }
