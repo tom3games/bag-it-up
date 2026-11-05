@@ -38,121 +38,41 @@ const S = {
 const TT = () => D.T[S.lang]
 const pick = a => a[Math.floor(S.rand() * a.length) % a.length]
 
-// ---------- 音（WebAudio だけ）
-const Snd = {
-  ctx: null, muted: store.get('mute') === '1', next: 0, step: 0, track: null, want: null, switchAt: 0, played: {}, tempo: 1,
-  TEMPO: { title: 124, play: 132, over: 76 },
-  init() {
-    if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return }
-    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return
-    try {
-      const c = this.ctx = new AC()
-      this.master = c.createGain(); this.master.gain.value = this.muted ? 0 : 0.8
-      this.an = c.createAnalyser(); this.an.fftSize = 2048; this.master.connect(this.an); this.an.connect(c.destination)
-      this.bgm = c.createGain(); this.bgm.gain.value = 0.0001; this.bgm.connect(this.master)
-      const len = c.sampleRate * 2; this.noiseBuf = c.createBuffer(1, len, c.sampleRate)
-      const d = this.noiseBuf.getChannelData(0); for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1
-      if (this.want) { const w = this.want; this.want = null; this.setTrack(w) }
-    } catch (e) { this.ctx = null }
+// ---------- 音（録音素材だけ。合成音は使わない。エンジンは sfx.js、出所は CREDITS.md）
+const sf = (pre, n) => Array.from({ length: n }, (_, i) => `snd/${pre}${i + 1}.mp3`)
+Snd.muted = store.get('mute') === '1'
+Snd.def({
+  tap: 'snd/tap.mp3', beep: 'snd/beep.mp3', grab: sf('grab', 3), thud: sf('thud', 3), crack: sf('crack', 3), shell: 'snd/shell.mp3',
+  splash: sf('splash', 2), squash: sf('crack', 3), melt: sf('melt', 2), drop: sf('drop', 2), done: 'snd/done.mp3', full: sf('bag', 3), bag: sf('bag', 3),
+  sigh: sf('sigh', 2), mada: sf('grunt', 3), tapfoot: sf('foot', 3), complaint: sf('grunt', 3), mgr: sf('grunt', 3), over: 'snd/over.mp3', stamp: 'snd/stamp.mp3',
+  boing: sf('boing', 2), squeak: sf('squeak', 3),
+})
+const SND_TRACKS = { title: ['snd/bgm_title.mp3', 0.22, 1], play: ['snd/bgm_play.mp3', 0.26, 1], over: ['snd/bgm_title.mp3', 0.16, 0.8] }
+Object.assign(Snd, {
+  want: null, tempo: 1, tense: 0, _init: Snd.init, _setMute: Snd.setMute,
+  init() { const first = !this.ctx; this._init(); if (first && this.ctx) { this.loop('amb', 'snd/amb_fridge.mp3', 0.12, 1); this.applyTrack() } },
+  setMute(m) { this._setMute(m); store.set('mute', m ? '1' : '0') },
+  setTrack(name) { if (this.want === name) return; this.want = name; this.applyTrack() },
+  applyTrack() {
+    if (!this.ctx) return
+    const t = this.want && SND_TRACKS[this.want]; this.loop('bgm', t ? t[0] : null, t ? t[1] : 0, 0.3)
+    if (t) this.played['bgm:' + this.want] = (this.played['bgm:' + this.want] || 0) + 1
   },
-  setMute(m) { this.muted = m; store.set('mute', m ? '1' : '0'); if (this.master) this.master.gain.value = m ? 0 : 0.8 },
-  now() { return this.ctx ? this.ctx.currentTime : 0 },
-  level() { if (!this.an) return 0; const d = new Float32Array(this.an.fftSize); this.an.getFloatTimeDomainData(d); let m = 0; for (const v of d) m = Math.max(m, Math.abs(v)); return m },
-  mtof: m => 440 * Math.pow(2, (m - 69) / 12),
-  mark(n) { this.played[n] = (this.played[n] || 0) + 1 },
-  tone(f, t0, dur, type = 'square', vol = 0.2, dest, f2) {
-    if (!this.ctx) return; const c = this.ctx, o = c.createOscillator(), g = c.createGain()
-    o.type = type; o.frequency.setValueAtTime(f, t0); if (f2) o.frequency.exponentialRampToValueAtTime(f2, t0 + dur)
-    g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(Math.max(0.0002, vol), t0 + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur)
-    o.connect(g); g.connect(dest || this.master); o.start(t0); o.stop(t0 + dur + 0.02)
-  },
-  noise(t0, dur, vol, freq, type = 'highpass', dest, q) {
-    if (!this.ctx) return; const c = this.ctx, s = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain()
-    s.buffer = this.noiseBuf; f.type = type; f.frequency.value = freq; if (q) f.Q.value = q
-    g.gain.setValueAtTime(Math.max(0.0002, vol), t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur)
-    s.connect(f); f.connect(g); g.connect(dest || this.master); s.start(t0, Math.random()); s.stop(t0 + dur + 0.02)
-  },
-  voice(f, t0, dur, vol, formant = 900, f2) {
-    if (!this.ctx) return; const c = this.ctx, o = c.createOscillator(), bp = c.createBiquadFilter(), g = c.createGain()
-    o.type = 'sawtooth'; o.frequency.setValueAtTime(f, t0); if (f2) o.frequency.exponentialRampToValueAtTime(f2, t0 + dur)
-    bp.type = 'bandpass'; bp.frequency.value = formant; bp.Q.value = 3
-    g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(vol, t0 + 0.02); g.gain.setValueAtTime(vol, t0 + dur * 0.7); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur)
-    o.connect(bp); bp.connect(g); g.connect(this.master); o.start(t0); o.stop(t0 + dur + 0.02)
-  },
-  setTrack(name) {
-    if (this.want === name) return
-    this.want = name; if (!this.ctx) return
-    const now = this.ctx.currentTime, g = this.bgm.gain
-    g.cancelScheduledValues(now); g.setValueAtTime(Math.max(0.0001, g.value), now); g.linearRampToValueAtTime(0.0001, now + 0.25)
-    this.switchAt = now + 0.27
-  },
-  tick() {
-    if (!this.ctx) return; const c = this.ctx
-    if (this.switchAt && c.currentTime >= this.switchAt) {
-      this.track = this.want; this.step = 0; this.next = c.currentTime + 0.05; this.switchAt = 0
-      const g = this.bgm.gain; g.cancelScheduledValues(c.currentTime); g.setValueAtTime(0.0001, c.currentTime); g.linearRampToValueAtTime(0.3, c.currentTime + 0.35)
-      if (this.track) this.mark('bgm:' + this.track)
-    }
-    if (!this.track || this.switchAt) return
-    const spb = 60 / (this.TEMPO[this.track] * (this.track === 'play' ? this.tempo : 1)) / 4
-    if (this.next < c.currentTime) this.next = c.currentTime + 0.05
-    while (this.next < c.currentTime + 0.25) { this['p_' + this.track](this.step, this.next); this.next += spb; this.step++ }
-  },
-  pl(n, t, dur = 0.1, vol = 0.07, type = 'triangle') { this.tone(this.mtof(n), t, dur, type, vol, this.bgm) },
-  // スーパーの店内放送みたいなのんきな曲（C）
-  p_title(i, t) {
-    const bar = Math.floor(i / 16) % 4, s = i % 16, root = [48, 53, 55, 48][bar]
-    if (s % 4 === 0) this.pl(root, t, 0.16, 0.3)
-    if (s % 4 === 2) this.pl(root + 12, t, 0.08, 0.12)
-    if (s % 4 === 2) this.noise(t, 0.03, 0.035, 6000, 'highpass', this.bgm)
-    const m = [[72, -1, 76, -1, 79, -1, 76, -1, 77, -1, 76, -1, 74, -1, -1, -1], [72, -1, 77, -1, 81, -1, 77, -1, 76, -1, 74, -1, 72, -1, -1, -1],
-      [74, -1, 79, -1, 83, -1, 79, -1, 81, -1, 79, -1, 77, -1, 74, -1], [76, -1, 74, -1, 72, -1, 67, -1, 72, -1, -1, -1, -1, -1, -1, -1]][bar]
-    if (m[s] > 0) { this.pl(m[s], t, 0.14, 0.07, 'square'); this.pl(m[s] + 12, t, 0.08, 0.03) }
-  },
-  // 遊び中: 同じ曲が客の圧で速く・不穏に
-  p_play(i, t) {
-    const bar = Math.floor(i / 16) % 4, s = i % 16, root = [48, 53, 55, 48][bar], ten = this.tense || 0
-    if (s % 4 === 0) this.pl(root, t, 0.14, 0.3)
-    if (s % 4 === 2) this.pl(root + 7, t, 0.08, 0.12)
-    if (s % 2 === 1) this.noise(t, 0.025, 0.03 + ten * 0.03, 7000, 'highpass', this.bgm)
-    if (ten >= 2 && s % 8 === 4) this.pl(root + 13, t, 0.3, 0.05, 'sawtooth')
-    const m = [[72, -1, 76, 79, -1, 76, 77, -1, 76, -1, 74, -1, 72, -1, 67, -1], [72, -1, 77, 81, -1, 77, 76, -1, 74, -1, 72, -1, 74, -1, -1, -1],
-      [74, -1, 79, 83, -1, 79, 81, -1, 79, -1, 77, -1, 74, -1, 71, -1], [72, -1, 76, -1, 74, -1, 71, -1, 72, -1, -1, -1, 67, -1, -1, -1]][bar]
-    if (m[s] > 0) this.pl(m[s] + (ten >= 2 ? 1 : 0) * (s % 3 === 0 ? -1 : 0), t, 0.1, 0.06, 'square')
-  },
-  p_over(i, t) {
-    const s = i % 16, bar = Math.floor(i / 16) % 2
-    if (s === 0) this.pl([45, 41][bar], t, 1.2, 0.25)
-    const m = [69, -1, -1, 68, -1, -1, 67, -1, -1, -1, 66, -1, -1, -1, -1, -1]
-    if (m[s] > 0 && bar === 0) this.pl(m[s], t, 0.4, 0.06, 'square')
-  },
+  // 遊び中は客の圧で曲が速く・高くなる
+  tick() { const l = this.loops.bgm; if (l && l.node) l.node.playbackRate.value = (SND_TRACKS[this.want] || [0, 0, 1])[2] * (this.want === 'play' ? this.tempo : 1) },
   sfx(n, o = {}) {
-    if (!this.ctx) return; this.mark(n)
-    const t = this.ctx.currentTime + 0.01
-    switch (n) {
-      case 'tap': this.tone(900, t, 0.05, 'square', 0.08); break
-      case 'beep': this.tone(1900, t, 0.09, 'square', 0.07); break
-      case 'grab': this.noise(t, 0.06, 0.12, 2500, 'bandpass', null, 2); this.tone(500, t, 0.05, 'triangle', 0.08, null, 700); break
-      case 'thud': { const v = clamp(o.v ?? 0.5, 0.1, 1); this.noise(t, 0.12, 0.25 * v, 300 + 400 * (1 - v), 'lowpass'); this.tone(120 - 50 * v, t, 0.12, 'sine', 0.35 * v, null, 50); break }
-      case 'crack': this.noise(t, 0.05, 0.4, 3000, 'highpass'); this.noise(t + 0.03, 0.08, 0.3, 1800, 'bandpass', null, 3); this.noise(t + 0.08, 0.25, 0.25, 600, 'lowpass'); this.tone(300, t + 0.06, 0.2, 'sine', 0.1, null, 120); break
-      case 'splash': for (let k = 0; k < 4; k++) this.noise(t + k * 0.05, 0.12, 0.18, 900 + k * 500, 'bandpass', null, 4); break
-      case 'squash': this.tone(260, t, 0.25, 'sawtooth', 0.12, null, 60); this.noise(t, 0.2, 0.15, 1200, 'lowpass'); break
-      case 'melt': this.tone(700, t, 0.5, 'sine', 0.12, null, 180); break
-      case 'drop': this.tone(500, t, 0.35, 'square', 0.1, null, 120); this.noise(t + 0.25, 0.2, 0.35, 400, 'lowpass'); break
-      case 'done': this.tone(1568, t, 0.12, 'sine', 0.2); this.tone(2093, t + 0.12, 0.3, 'sine', 0.2); this.noise(t, 0.15, 0.08, 5000, 'highpass'); break
-      case 'full': this.tone(784, t, 0.1, 'square', 0.1); this.tone(1046, t + 0.1, 0.18, 'square', 0.1); break
-      case 'sigh': this.noise(t, 0.6, 0.12, 900, 'bandpass', null, 1.5); this.voice(180, t, 0.5, 0.05, 700, 120); break
-      case 'mada': { const p = o.hot ? 1.3 : 1; this.voice(240 * p, t, 0.14, 0.12, 1100); this.voice(300 * p, t + 0.16, 0.22, 0.12, 900, 260 * p); break }
-      case 'tapfoot': this.noise(t, 0.04, 0.12, 900, 'lowpass'); this.noise(t + 0.16, 0.04, 0.1, 900, 'lowpass'); break
-      case 'complaint': this.voice(330, t, 0.18, 0.18, 1200); this.voice(380, t + 0.2, 0.18, 0.18, 1300); this.voice(420, t + 0.4, 0.4, 0.2, 1100, 300); break
-      case 'mgr': this.voice(110, t, 0.5, 0.2, 600, 90); this.tone(98, t, 0.8, 'sawtooth', 0.06); break
-      case 'over': this.tone(392, t, 0.25, 'square', 0.12); this.tone(370, t + 0.28, 0.25, 'square', 0.12); this.tone(349, t + 0.56, 0.25, 'square', 0.12); this.tone(330, t + 0.84, 0.8, 'square', 0.12, null, 200); break
-      case 'stamp': this.noise(t, 0.15, 0.5, 300, 'lowpass'); this.tone(80, t, 0.2, 'sine', 0.4); break
-      case 'boing': this.tone(200, t, 0.3, 'sine', 0.2, null, 500); break
-      case 'bag': this.noise(t, 0.3, 0.12, 4000, 'bandpass', null, 0.8); break
-    }
+    if (n === 'thud') { const v = clamp(o.v ?? 0.5, 0.1, 1); return this.play(n, { vol: 0.25 + 0.75 * v, rate: 1.15 - 0.3 * v }) }
+    if (n === 'crack') { this.play('shell', { vol: 0.7, rate: 1.5 }); return this.play(n, { vol: 0.9 }) }
+    if (n === 'squash') return this.play(n, { vol: 0.8, rate: 0.7 })
+    if (n === 'tapfoot') return this.play(n, { vol: 0.35 })
+    if (n === 'sigh') return this.play(n, { vol: 0.32, rate: 0.7 })
+    if (n === 'mada') return this.play(n, { vol: 0.7, rate: o.hot ? 1.35 : 1.1 })
+    if (n === 'complaint') { this.duck(0.35, 1.2); this.play(n, { vol: 1, rate: 1.3 }); return this.play(n, { vol: 1, rate: 1.45, delay: 0.22 }) }
+    if (n === 'mgr') return this.play(n, { vol: 1, rate: 0.62, room: 0.4 })
+    if (n === 'over') this.duck(0.2, 1.8)
+    return this.play(n, { vol: { tap: 0.45, beep: 0.5, grab: 0.6, full: 0.8, bag: 0.55 }[n] ?? 0.9 })
   },
-}
+})
 
 // ---------- 描画の土台
 const canvas = $('#gl')
@@ -406,6 +326,52 @@ function makeItemMesh(kind) {
       for (let i = 0; i < 7; i++) { const lf = mesh(new THREE.ConeGeometry(0.06, 0.45, 5), std(0x3f8f3a, { roughness: 0.6 }), 0, h * 0.28, 0, g); lf.rotation.set((i % 3 - 1) * 0.4, i, (i % 2 ? 1 : -1) * 0.25 * (i / 3)) }
       break
     }
+    case 'chicken': {
+      const yl = m1('chk', () => std(0xf7d73a, { roughness: 0.35 })), rd = m1('chkr', () => std(0xd62828, { roughness: 0.4 })), or = m1('chko', () => std(0xf28c28, { roughness: 0.4 }))
+      mesh(new THREE.SphereGeometry(r * 0.82, 18, 14), yl, 0, -r * 0.1, 0, g).scale.set(1.15, 0.92, 0.9)
+      mesh(new THREE.SphereGeometry(r * 0.44, 16, 12), yl, -r * 0.62, r * 0.5, 0, g)
+      mesh(new THREE.ConeGeometry(r * 0.13, r * 0.34, 8), or, -r * 1.02, r * 0.46, 0, g).rotation.z = Math.PI / 2
+      for (const i of [-1, 0, 1]) mesh(new THREE.SphereGeometry(r * 0.12, 10, 8), rd, -r * 0.62 + i * r * 0.14, r * 0.96 - Math.abs(i) * r * 0.06, 0, g)
+      mesh(new THREE.SphereGeometry(r * 0.09, 8, 6), m1('blk', () => std(0x111111, { roughness: 0.2 })), -r * 0.8, r * 0.58, r * 0.32, g)
+      const tail = mesh(new THREE.ConeGeometry(r * 0.26, r * 0.5, 8), yl, r * 0.9, r * 0.28, 0, g); tail.rotation.z = -0.8
+      for (const s of [-1, 1]) mesh(new THREE.CylinderGeometry(r * 0.05, r * 0.05, r * 0.28, 6), or, r * 0.1 * s, -r * 0.84, 0, g)
+      break
+    }
+    case 'toilet': {
+      const wt = m1('roll', () => std(0xfbfaf4, { roughness: 0.9 })), cd = m1('rollc', () => std(0x8a6a3a, { roughness: 0.9 }))
+      for (let iy = 0; iy < 2; iy++) for (let ix = 0; ix < 3; ix++) { const rr = h / 4.2, cy = mesh(new THREE.CylinderGeometry(rr, rr, d * 0.92, 18), wt, (ix - 1) * w / 3, (iy - 0.5) * h / 2, 0, g); cy.rotation.x = Math.PI / 2; const hole = mesh(new THREE.CircleGeometry(rr * 0.32, 12), cd, (ix - 1) * w / 3, (iy - 0.5) * h / 2, d * 0.46 + 0.005, g); hole.castShadow = false }
+      mesh(new THREE.BoxGeometry(w * 1.02, h * 1.02, d * 1.02), clearMat(), 0, 0, 0, g).castShadow = false
+      const lt = canvasTex(256, 64, (x, W, H) => label(x, W, H, { bg: '#2f7dd1', fg: '#fff', text: 'ダブル12ロール', size: 26, ty: 0.52 }))
+      mesh(new THREE.PlaneGeometry(w * 0.72, h * 0.2), new THREE.MeshBasicMaterial({ map: lt }), 0, 0, d * 0.52 + 0.012, g)
+      break
+    }
+    case 'tanuki': {
+      const br = m1('tnk', () => std(0x7a5a3c, { roughness: 0.45 })), lt = m1('tnkl', () => std(0xe3cfa6, { roughness: 0.5 })), hat = m1('tnkh', () => std(0x4a4034, { roughness: 0.55 })), blk = m1('blk', () => std(0x111111, { roughness: 0.2 }))
+      mesh(new THREE.SphereGeometry(w * 0.5, 22, 16), br, 0, -h * 0.2, 0, g).scale.set(1, 1.02, 0.86)
+      mesh(new THREE.SphereGeometry(w * 0.34, 20, 14), lt, 0, -h * 0.25, w * 0.18, g)
+      mesh(new THREE.SphereGeometry(w * 0.34, 20, 14), br, 0, h * 0.2, 0, g)
+      mesh(new THREE.SphereGeometry(w * 0.2, 14, 10), lt, 0, h * 0.13, w * 0.2, g)
+      for (const s of [-1, 1]) { mesh(new THREE.SphereGeometry(w * 0.07, 10, 8), blk, s * w * 0.12, h * 0.26, w * 0.28, g); mesh(new THREE.SphereGeometry(w * 0.09, 10, 8), br, s * w * 0.25, h * 0.4, 0, g) }
+      mesh(new THREE.SphereGeometry(w * 0.05, 8, 6), blk, 0, h * 0.15, w * 0.38, g)
+      mesh(new THREE.ConeGeometry(w * 0.46, h * 0.12, 18), hat, 0, h * 0.44, 0, g)
+      const bag = mesh(new THREE.BoxGeometry(w * 0.22, h * 0.26, w * 0.1), hat, w * 0.42, -h * 0.08, w * 0.1, g); bag.rotation.z = 0.2
+      break
+    }
+    case 'daruma': {
+      const dt = canvasTex(256, 128, (x, W, H) => { x.fillStyle = '#c1121f'; x.fillRect(0, 0, W, H); x.fillStyle = '#fbf3e4'; x.beginPath(); x.ellipse(W * 0.75, H * 0.44, 40, 32, 0, 0, 7); x.fill(); x.fillStyle = '#1d1a16'; x.beginPath(); x.arc(W * 0.75 - 20, H * 0.4, 9, 0, 7); x.fill(); x.lineWidth = 4; x.strokeStyle = '#1d1a16'; x.beginPath(); x.arc(W * 0.75 + 20, H * 0.4, 9, 0, 7); x.stroke(); x.beginPath(); x.moveTo(W * 0.75 - 14, H * 0.62); x.quadraticCurveTo(W * 0.75, H * 0.7, W * 0.75 + 14, H * 0.62); x.stroke() })
+      const b = mesh(new THREE.SphereGeometry(r, 26, 20), std(0xffffff, { map: dt, roughness: 0.25 }), 0, 0, 0, g); b.scale.set(1, 1.04, 1); b.rotation.y = -Math.PI * 0.25 - Math.PI / 2
+      break
+    }
+    case 'goldfish': {
+      const wm = std(0x9ad7f5, { roughness: 0.05, transparent: true, opacity: 0.5, depthWrite: false })
+      parts.water = mesh(new THREE.SphereGeometry(0.5, 22, 16), wm, 0, -h * 0.1, 0, g); parts.water.scale.set(w * 0.98, h * 0.74, d * 0.98)
+      const or = m1('gf', () => std(0xf2591f, { roughness: 0.35 }))
+      const f = mesh(new THREE.SphereGeometry(0.1, 12, 10), or, 0.02, -h * 0.1, 0.02, g); f.scale.set(1.3, 0.75, 0.6)
+      const t = mesh(new THREE.ConeGeometry(0.075, 0.12, 6), or, 0.17, -h * 0.1, 0.02, g); t.rotation.z = Math.PI / 2; t.scale.z = 0.3
+      mesh(new THREE.CylinderGeometry(0.05, w * 0.18, h * 0.22, 12), clearMat(), 0, h * 0.34, 0, g).castShadow = false
+      mesh(new THREE.TorusGeometry(0.05, 0.016, 6, 12), m1('gfr', () => std(0xd62828)), 0, h * 0.46, 0, g).rotation.x = Math.PI / 2
+      break
+    }
     case 'rice': {
       const rt = canvasTex(256, 128, (x, W, H) => label(x, W, H, { bg: '#f7f1e3', fg: '#1d1a16', text: 'お米', size: 52, ty: 0.42, sub: '5kg', subSize: 30, sy: 0.8, subFg: '#c1121f', draw: (x) => { x.fillStyle = '#3f8f3a'; x.fillRect(0, 0, 26, H); x.fillRect(W - 26, 0, 26, H) } }))
       const b = boxWithLabel(w, h, d, rt, 0xf7f1e3, { rough: 0.85 }); g.add(b)
@@ -444,6 +410,7 @@ function onPostSolve(contact, imp) {
   const n = imp.normalImpulses, sum = (n[0] || 0) + (n[1] || 0)
   if (sum <= 0) return
   const ia = A.getUserData(), ib = B.getUserData()
+  if (((ia && ia.def && ia.def.squeaky) || (ib && ib.def && ib.def.squeaky)) && sum > 0.1 && S.time - (S.lastSq || 0) > 0.18) { S.lastSq = S.time; S.squeakQ = true }
   if (sum > 0.9 && S.time - S.lastThud > 0.09) { S.lastThud = S.time; S.thudQ = Math.max(S.thudQ || 0, sum) }
   for (const [me, other, ob] of [[ia, ib, B], [ib, ia, A]]) {
     if (!me || !me.kind) continue
@@ -463,8 +430,69 @@ function loadChars() {
   const all = [...CHAR_FILES, 'male-d']
   return Promise.all(all.map(n => new Promise(res => loader.load(`chars/character-${n}.glb`, g => { MODELS[n] = g; res() }, undefined, () => res())))).then(() => { charsReady = true })
 }
+// ---------- 客の顔（Kenney の顔はテクスチャ固定なので、目と口の面を肌色に塗り替えて、頭の骨に顔の板を貼る）
+const FACE_INK = '#34343c'
+function faceTex(expr) {
+  return _tex['face-' + expr] || (_tex['face-' + expr] = canvasTex(256, 256, (x) => {
+    x.fillStyle = FACE_INK; x.strokeStyle = FACE_INK; x.lineCap = 'round'; x.lineJoin = 'round'
+    const poly = (...p) => { x.beginPath(); x.moveTo(p[0], p[1]); for (let i = 2; i < p.length; i += 2) x.lineTo(p[i], p[i + 1]); x.closePath(); x.fill() }
+    const both = (f) => { f(1); x.save(); x.translate(256, 0); x.scale(-1, 1); f(-1); x.restore() }
+    const white = (cx, cy, rx, ry) => { x.fillStyle = '#fff'; x.beginPath(); x.ellipse(cx, cy, rx, ry, 0, 0, 7); x.fill(); x.fillStyle = FACE_INK }
+    const cheeks = (a) => { x.fillStyle = `rgba(230,60,50,${a})`; both(() => { x.beginPath(); x.ellipse(42, 158, 28, 18, 0, 0, 7); x.fill() }); x.fillStyle = FACE_INK }
+    switch (expr) {
+      case 'calm': both(() => { x.beginPath(); x.ellipse(82, 100, 15, 21, 0, 0, 7); x.fill() }); x.lineWidth = 11; x.beginPath(); x.moveTo(100, 172); x.quadraticCurveTo(128, 190, 156, 172); x.stroke(); break
+      case 'blink': x.lineWidth = 11; both(() => { x.beginPath(); x.moveTo(64, 102); x.lineTo(100, 102); x.stroke() }); x.beginPath(); x.moveTo(100, 172); x.quadraticCurveTo(128, 190, 156, 172); x.stroke(); break
+      case 'annoyed': both(() => { poly(58, 92, 106, 92, 106, 118, 58, 118); x.lineWidth = 9; x.beginPath(); x.moveTo(54, 74); x.lineTo(110, 78); x.stroke() }); x.lineWidth = 11; x.beginPath(); x.moveTo(102, 178); x.lineTo(154, 172); x.stroke(); break
+      case 'angry': both(() => { poly(60, 98, 108, 112, 100, 130, 62, 124); x.lineWidth = 15; x.beginPath(); x.moveTo(50, 62); x.lineTo(112, 92); x.stroke() }); x.lineWidth = 12; x.beginPath(); x.moveTo(96, 186); x.quadraticCurveTo(128, 158, 160, 186); x.stroke(); cheeks(0.28); break
+      case 'fury': cheeks(0.6); both(() => { white(80, 112, 28, 28); x.beginPath(); x.ellipse(88, 116, 9, 9, 0, 0, 7); x.fill(); x.lineWidth = 19; x.beginPath(); x.moveTo(42, 56); x.lineTo(116, 94); x.stroke() }); poly(78, 156, 178, 156, 186, 218, 70, 218); x.fillStyle = '#fff'; x.fillRect(86, 162, 84, 18); x.fillStyle = '#d9534f'; x.beginPath(); x.ellipse(128, 206, 34, 12, 0, 0, 7); x.fill(); break
+      case 'shock': both(() => { white(82, 104, 28, 34); x.beginPath(); x.ellipse(82, 106, 8, 8, 0, 0, 7); x.fill(); x.lineWidth = 9; x.beginPath(); x.moveTo(52, 50); x.quadraticCurveTo(82, 34, 110, 52); x.stroke() }); x.beginPath(); x.ellipse(128, 188, 18, 26, 0, 0, 7); x.fill(); break
+      case 'happy': x.lineWidth = 13; both(() => { x.beginPath(); x.moveTo(58, 110); x.quadraticCurveTo(82, 74, 106, 110); x.stroke() }); poly(88, 158, 168, 158, 150, 204, 106, 204); x.fillStyle = '#d9534f'; x.beginPath(); x.ellipse(128, 192, 16, 9, 0, 0, 7); x.fill(); cheeks(0.25); break
+      case 'stern': both(() => { poly(62, 92, 104, 104, 100, 122, 62, 120); x.lineWidth = 15; x.beginPath(); x.moveTo(52, 70); x.lineTo(112, 86); x.stroke() }); x.lineWidth = 12; x.beginPath(); x.moveTo(100, 178); x.lineTo(156, 178); x.stroke(); break
+    }
+  }))
+}
+const FACE_DY = { 'male-a': -0.1 }   // 白い丸メガネの中に目が来るように下げる
+function modelName(model) { return Object.keys(MODELS).find(k => MODELS[k] === model) }
+// 目と口の濃い面の UV を、同じ高さの肌の UV に差し替える（モデルごとに1回）。顔の枠を返す
+function blankFace(model) {
+  if (model.userData.face !== undefined) return model.userData.face
+  let hm = null; model.scene.traverse(o => { if (o.name === 'head-mesh') hm = o })
+  model.userData.face = null; if (!hm) return null
+  const g = hm.geometry, pos = g.attributes.position, uv = g.attributes.uv, idx = g.index, img = hm.material.map.image
+  const cv = document.createElement('canvas'); cv.width = img.width; cv.height = img.height; const cx = cv.getContext('2d'); cx.drawImage(img, 0, 0); const d = cx.getImageData(0, 0, img.width, img.height).data
+  // 目と口は全モデル同じ1色 (63,63,70)。髪のグレーはグラデーションなので混ざらない
+  const dark = (i) => { const px = Math.min(img.width - 1, Math.floor(uv.getX(i) * img.width)), py = Math.min(img.height - 1, Math.floor(uv.getY(i) * img.height)), k = (py * img.width + px) * 4; return Math.abs(d[k] - 63) < 3 && Math.abs(d[k + 1] - 63) < 3 && Math.abs(d[k + 2] - 70) < 3 }
+  const eyes = new Set(); let z0 = 0
+  for (let t = 0; t < idx.count; t += 3) { const a = idx.getX(t), b = idx.getX(t + 1), c = idx.getX(t + 2); if (dark(a) && dark(b) && dark(c) && Math.min(pos.getZ(a), pos.getZ(b), pos.getZ(c)) > 0.08) { eyes.add(a); eyes.add(b); eyes.add(c); z0 = Math.max(z0, pos.getZ(a)) } }
+  if (!eyes.size) return null
+  // 同じ面の上に描いてあるアイシャドウなども一緒に消す
+  for (let t = 0; t < idx.count; t += 3) { const a = idx.getX(t), b = idx.getX(t + 1), c = idx.getX(t + 2); if (Math.abs(pos.getZ(a) - z0) < 0.0015 && Math.abs(pos.getZ(b) - z0) < 0.0015 && Math.abs(pos.getZ(c) - z0) < 0.0015) { eyes.add(a); eyes.add(b); eyes.add(c) } }
+  let x0 = 9, x1 = -9, y0 = 9, y1 = -9
+  for (const i of eyes) { x0 = Math.min(x0, pos.getX(i)); x1 = Math.max(x1, pos.getX(i)); y0 = Math.min(y0, pos.getY(i)); y1 = Math.max(y1, pos.getY(i)) }
+  const fy = (y0 + y1) / 2 + (FACE_DY[model.scene.children[0] && modelName(model)] || 0)
+  // 顔の面の肌の色: 目のすぐ後ろで、目の中心を含む面
+  let skin = null, best = -9
+  for (let t = 0; t < idx.count; t += 3) {
+    const a = idx.getX(t), b = idx.getX(t + 1), c = idx.getX(t + 2); if (eyes.has(a)) continue
+    const ys = [pos.getY(a), pos.getY(b), pos.getY(c)], xs = [pos.getX(a), pos.getX(b), pos.getX(c)], z = Math.max(pos.getZ(a), pos.getZ(b), pos.getZ(c))
+    if (Math.min(...ys) > fy || Math.max(...ys) < fy || Math.min(...xs) > 0 || Math.max(...xs) < 0 || z > z0 + 0.001 || z < best) continue
+    best = z; skin = [uv.getX(a), uv.getY(a)]
+  }
+  if (skin) { for (const i of eyes) uv.setXY(i, skin[0], skin[1]); uv.needsUpdate = true }
+  const skel = hm.skeleton, bi = skel ? skel.bones.findIndex(b => b.name === 'head') : -1
+  model.userData.face = { p: new THREE.Vector3(0, fy, z0 + 0.004), w: 0.34, bind: bi >= 0 ? skel.boneInverses[bi].clone() : null }
+  return model.userData.face
+}
+function setFace(c, expr) { if (!c.face || c.expr === expr) return; c.expr = expr; c.face.material.map = faceTex(expr) }
+function moodExpr(c, m, dt) {
+  if ((c.shockT || 0) > 0) { c.shockT -= dt; return 'shock' }
+  if (m > 0.82) return 'fury'; if (m > 0.55) return 'angry'; if (m > 0.3) return 'annoyed'
+  c.blinkT = (c.blinkT ?? 1 + Math.random() * 3) - dt; if (c.blinkT < 0) { if (c.blinkT < -0.12) c.blinkT = 2 + Math.random() * 3; return 'blink' }
+  return 'calm'
+}
 function makeChar(name) {
   const src = MODELS[name]; if (!src) return null
+  const fb = blankFace(src)
   const root = skClone(src.scene), g = new THREE.Group(); g.add(root)
   root.traverse(o => { if (o.isMesh) { o.castShadow = true; o.material = o.material.clone(); o.material.roughness = 0.75 } })
   const box = new THREE.Box3().setFromObject(root), hgt = box.max.y - box.min.y
@@ -474,6 +502,11 @@ function makeChar(name) {
   for (const c of src.animations) acts[c.name] = mixer.clipAction(c)
   const head = root.getObjectByName('head')
   const c = { g, mixer, acts, cur: null, head, name, mood: 0, bubT: 0, tapT: 0, mats, dim: 0 }
+  if (fb && head) {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(fb.w, fb.w), new THREE.MeshBasicMaterial({ map: faceTex('calm'), transparent: true, depthWrite: false, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -2 }))
+    if (fb.bind) m.position.copy(fb.p).applyMatrix4(fb.bind); else { m.position.copy(fb.p); m.position.y -= head.position.y }
+    m.renderOrder = 2; head.add(m); c.face = m; c.expr = 'calm'
+  }
   // 怒りマーク・汗
   c.anger = new THREE.Sprite(new THREE.SpriteMaterial({ map: angerTex(), transparent: true, depthTest: false, toneMapped: false })); c.anger.scale.setScalar(0.7); c.anger.visible = false; c.anger.renderOrder = 9; scene.add(c.anger)
   c.sweat = new THREE.Sprite(new THREE.SpriteMaterial({ map: sweatTex(), transparent: true, depthTest: false, toneMapped: false })); c.sweat.scale.setScalar(0.45); c.sweat.visible = false; c.sweat.renderOrder = 9; scene.add(c.sweat)
@@ -507,13 +540,17 @@ function setupManager() {
 const FX = []
 const _w = new THREE.Vector3()
 function toScreen(p) { _w.copy(p).project(camera); return { x: (_w.x + 1) / 2 * innerWidth, y: (1 - _w.y) / 2 * innerHeight } }
+// 同時に出す文字は2つまで（古い物から消す）
+function trimFx() { while (FX.length >= 2) { const f = FX.shift(); f.el.remove(); if (f.c && f.c.bub === f.el) f.c.bub = null } }
 function ono(text, pos, cls = '', o = {}) {
+  trimFx()
   const el = document.createElement('div'); el.className = 'ono ' + cls; el.textContent = text
   el.style.fontSize = (o.size ?? 30) + 'px'; $('#fx').appendChild(el)
   FX.push({ el, pos: pos.clone(), t: 0, life: o.life ?? 1.1, rise: o.rise ?? 0.8, kind: 'ono', rot: (Math.random() - 0.5) * 16 })
 }
 function bubble(c, text, cls = '', life = 1.6) {
-  if (c.bub) { c.bub.remove(); const i = FX.findIndex(f => f.el === c.bub); if (i >= 0) FX.splice(i, 1) }
+  if (c.bub) { c.bub.remove(); const i = FX.findIndex(f => f.el === c.bub); if (i >= 0) FX.splice(i, 1); c.bub = null }
+  trimFx()
   const el = document.createElement('div'); el.className = 'sb ' + cls; el.textContent = text; $('#fx').appendChild(el)
   c.bub = el; FX.push({ el, c, t: 0, life, kind: 'sb' })
 }
@@ -538,6 +575,52 @@ function updateFx(dt) {
       const jig = f.el.classList.contains('hot') ? Math.sin(S.time * 60) * 2 : 0
       f.el.style.transform = `translate(${x + jig}px,${y}px) scale(${sc})`; f.el.style.opacity = k > 0.85 ? (1 - k) / 0.15 : 1
     }
+  }
+}
+
+// ---------- 店員の手（CC0 の手の素材が無いので Kenney の人物と同じ質感で作る。袋の口を持っていて、つかむと近い方が取りに行く）
+const HANDS = []
+function makeHand(sx) {
+  const skin = m1('hand', () => std(0xf0c7a0, { roughness: 0.62 })), sleeve = m1('slv', () => std(0x2a9d6f, { roughness: 0.75 })), cuff = m1('cuff', () => std(0xf3efe6, { roughness: 0.7 }))
+  const h = { sx, g: new THREE.Group(), arm: new THREE.Group(), fingers: [], thumb: null, pos: new THREE.Vector3(sx * (BW / 2 + 0.06), BH - 0.1, BD / 2 + 0.06), grip: 0 }
+  const palm = mesh(new THREE.CapsuleGeometry(0.135, 0.11, 4, 10), skin, 0, 0.1, 0, h.g); palm.scale.set(1.2, 1, 0.55)
+  for (let i = 0; i < 4; i++) {
+    const piv = new THREE.Group(); piv.position.set((i - 1.5) * 0.078, 0.25, 0); h.g.add(piv)
+    const a = mesh(new THREE.CapsuleGeometry(0.036, 0.1 - Math.abs(i - 1.5) * 0.012, 3, 8), skin, 0, 0.075, 0, piv)
+    const j = new THREE.Group(); j.position.y = 0.14; piv.add(j); mesh(new THREE.CapsuleGeometry(0.033, 0.06, 3, 8), skin, 0, 0.05, 0, j)
+    h.fingers.push({ piv, j }); a.castShadow = false
+  }
+  const tp = new THREE.Group(); tp.position.set(-sx * 0.15, 0.08, 0.03); tp.rotation.z = sx * 0.9; h.g.add(tp)
+  mesh(new THREE.CapsuleGeometry(0.044, 0.11, 3, 8), skin, 0, 0.09, 0, tp); h.thumb = tp
+  const c = mesh(new THREE.CylinderGeometry(0.15, 0.16, 0.1, 14), cuff, 0, -0.08, 0, h.g); c.scale.z = 0.72
+  const fore = mesh(new THREE.CylinderGeometry(1, 1, 1, 14), sleeve, 0, 0, 0, h.arm); h.fore = fore
+  scene.add(h.g); scene.add(h.arm)
+  h.g.traverse(o => { o.castShadow = false }); fore.castShadow = false
+  HANDS.push(h)
+  return h
+}
+makeHand(1); makeHand(-1)
+const _hd = new THREE.Vector3(), _hy = new THREE.Vector3(0, 1, 0), _ht = new THREE.Vector3(), _ha = new THREE.Vector3()
+function updateHands(dt) {
+  const vis = S.mode !== 'result'; for (const h of HANDS) { h.g.visible = vis; h.arm.visible = vis } if (!vis) return
+  const held = S.held ? S.held.it : null
+  const nearer = held ? (held.g.position.x >= 0 ? 1 : -1) : 0
+  for (const h of HANDS) {
+    const grab = held && nearer === h.sx
+    if (grab) {
+      // 商品の横をつかむ（商品を隠さない）
+      const halfW = (held.def.w ?? held.def.r * 2) * held.scale / 2
+      _ht.copy(held.g.position).add(_q.set(h.sx * (halfW + 0.2), -0.12, 0.14))
+    } else _ht.set(h.sx * (BW / 2 + 0.1), BH - 0.14, BD / 2 + 0.08)
+    h.pos.lerp(_ht, Math.min(1, dt * (grab ? 22 : 9)))
+    h.grip = lerp(h.grip, grab ? 1 : 0.55, Math.min(1, dt * 14))
+    // 腕は画面の外（手前の横）から伸びる
+    _ha.set(h.sx * 4.2, h.pos.y - 1.1, h.pos.z + 2.2)
+    _hd.copy(h.pos).sub(_ha); const len = _hd.length(); _hd.normalize()
+    h.g.position.copy(h.pos); h.g.quaternion.setFromUnitVectors(_hy, _hd)
+    h.arm.position.copy(_ha).addScaledVector(_hd, len / 2 - 0.06)
+    h.arm.quaternion.copy(h.g.quaternion); h.fore.scale.set(0.15, len - 0.1, 0.12)
+    for (const f of h.fingers) { f.piv.rotation.x = 0.35 + h.grip * 0.75; f.j.rotation.x = 0.3 + h.grip * 0.9 }
   }
 }
 
@@ -590,7 +673,7 @@ function grab(it, x, y) {
   j.setTarget(pl.Vec2(wp.x, wp.y))
   S.held = { it, j, x, y }
   it.state = 'held'
-  Snd.sfx('grab')
+  Snd.sfx(it.def.squeaky ? 'squeak' : 'grab')
   if (S.tut === 0) S.tut = 1
 }
 function release() {
@@ -606,8 +689,10 @@ function newCustomer() {
   const name = CHAR_FILES[custId % CHAR_FILES.length]
   const c = charsReady ? makeChar(name) : null
   const n = S.custN
-  const list = makeList(n)
-  const cu = { id: ++custId, c, list, k: S.cust.length, state: 'walk', wait: 0, spawned: 0, spawnT: 0.6, mood: 0, done: false, x: 8, z: -8.2, bags: 0 }
+  const rare = S.mode === 'play' && n >= 4 && S.rand() < 0.14 ? pick(D.RARE) : null
+  const list = rare ? [...rare.list] : makeList(n)
+  const cu = { id: ++custId, c, list, k: S.cust.length, state: 'walk', wait: 0, spawned: 0, spawnT: 0.6, mood: 0, done: false, x: 8, z: -8.2, bags: 0, rare, line: null, wish: null, sayT: 0.35, hurt: false }
+  if (S.mode === 'play' && !(n === 0 && S.tut < 2)) { const o = orderLine(list, rare); cu.line = o.line; cu.wish = o.wish }
   if (c) { c.g.position.set(cu.x, CUST_Y, cu.z); play(c, 'walk', 0.2, 1.4) }
   S.cust.push(cu); S.custN++
   return cu
@@ -620,6 +705,21 @@ function makeList(n) {
   for (let i = 0; i < len; i++) out.push(S.rand() < odd ? pick(D.ODD) : pick(D.NORMAL))
   if (S.rand() < 0.6 && !out.includes('egg')) out.splice(Math.floor(S.rand() * (out.length + 1)), 0, 'egg')
   return out
+}
+// 注文の一言: 変な物 > 気をつける物 > たまに世間話。同じ人には1回だけ
+function orderLine(list, rare) {
+  if (rare) return { line: rare.say, wish: rare.wish || null }
+  const has = list.filter(k => IT[k].say), odd = has.filter(k => IT[k].odd)
+  const k = odd.length ? pick(odd) : has.length ? pick(has) : null
+  if (S.rand() < 0.18 || !k) return { line: pick(D.SMALLTALK), wish: null }
+  return { line: IT[k].say, wish: k }
+}
+function bubblesNow() { return FX.filter(f => f.kind === 'sb').length }
+function updateOrderLine(dt) {
+  const f = S.front; if (!f || !f.c || !f.line || f.state !== 'wait') return
+  f.sayT -= dt; if (f.sayT > 0 || bubblesNow() > 0) return
+  const text = f.line[S.lang]; f.line = null
+  bubble(f.c, text, 'order', Math.max(2.2, 0.9 + text.length * 0.12)); Snd.sfx('mada', { hot: false })
 }
 function queuePos(k) { return QUEUE[Math.min(k, QUEUE.length - 1)] }
 function updateCustomers(dt) {
@@ -655,13 +755,18 @@ function updateCustomers(dt) {
     // 上から見下ろすカメラなので、顔をこちらに上げる（頭のてっぺんが顔に見えないように）
     if (c.head) c.head.rotation.x += LOOKUP
     headPos(c, _hp)
+    setFace(c, cu.state === 'leave' ? (cu.hurt ? 'annoyed' : 'happy') : moodExpr(c, m, dt))
     c.anger.visible = m > 0.55 && cu.state !== 'leave'; c.anger.position.copy(_hp).add(_q.set(0.45, 0.25, 0)); c.anger.scale.setScalar(0.5 + 0.3 * m + (m > 0.8 ? Math.abs(Math.sin(S.time * 10)) * 0.2 : 0))
     c.sweat.visible = m > 0.3 && m <= 0.55 && cu.state !== 'leave'; c.sweat.position.copy(_hp).add(_q.set(-0.5, 0.1 - (S.time * 0.6 % 0.4), 0))
     if (c.puffT > 0) { c.puffT -= dt; c.puff.material.opacity = clamp(c.puffT / 0.8, 0, 1) * 0.9; c.puff.position.copy(_hp).add(_q.set(0.2 + (1 - c.puffT) * 0.6, -0.5 + (1 - c.puffT) * 0.3, 0.4)); c.puff.scale.setScalar(0.5 + (1 - c.puffT) * 0.6) } else c.puff.material.opacity = 0
   }
 }
 function lerpAngle(a, b, k) { let d = b - a; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; return a + d * k }
-function custReact(text, cls) { const f = S.front; if (!f || !f.c) return; bubble(f.c, text, cls || 'warm', 1.4); play(f.c, 'emote-no', 0.15, 1.6); f.c.reactT = 0.9 }
+function custReact(text, cls) {
+  const f = S.front; if (!f || !f.c) return
+  if (f.brokeWish && !f.saidBroke) { f.saidBroke = true; text = TT().broke; cls = 'hot' }
+  bubble(f.c, text, cls || 'warm', Math.max(1.4, 0.9 + text.length * 0.09)); play(f.c, 'emote-no', 0.15, 1.6); f.c.reactT = 0.9; f.c.shockT = 0.9
+}
 
 // ---------- 袋のやりとり
 let bagMesh = null, bagCi = 0, oldBags = []
@@ -695,7 +800,7 @@ function finishCustomer() {
   handOver('done')
   cu.state = 'leave'; S.served++; popChip('#hServed')
   S.P = Math.max(0, S.P - 0.24)
-  if (cu.c) { bubble(cu.c, TT().thanks, '', 1.2); play(cu.c, 'walk', 0.2, 1.6) }
+  if (cu.c) { const T = TT(), w = cu.hurt ? T.thanksBad : cu.wish ? T.thanksWish : T.thanks; bubble(cu.c, w, '', Math.max(1.2, 0.9 + w.length * 0.09)); play(cu.c, 'walk', 0.2, 1.6) }
   S.nextCustT = Math.min(S.nextCustT, 0.6)
 }
 function popChip(sel) { const e = $(sel); e.classList.remove('pop'); void e.offsetWidth; e.classList.add('pop') }
@@ -723,6 +828,7 @@ function damage(kind, it, n = 1) {
   S.dmg[kind] += n
   const P = { egg: 0.07 * n, tofu: 0.12, squash: 0.08, melt: 0.12, drop: 0.15 }[kind]
   S.P = Math.min(1.05, S.P + P)
+  const f = S.front; if (f && it && it.owner === f) { f.hurt = true; if (f.wish && f.wish === it.kind) f.brokeWish = true }
   if (S.mode === 'play') S.photoMoment = Math.max(S.photoMoment || 0, kind === 'egg' ? 2 : 1)
 }
 function crackEggs(it, n) {
@@ -758,9 +864,9 @@ function judge(it, dt) {
       const a = Math.abs(Math.sin(it.body.getAngle()))
       if (a > 0.5) { it.spillAcc += dt * (a - 0.4) * 3; if (Math.random() < 0.4) fx.burst(worldOf(it), { count: 2, color: 0x9fd3f0, speed: 0.6, life: 0.5, size: 0.08, gravity: 3 }) }
       if (it.spillAcc > 0.45) {
-        it.spilled = 1; it.parts.water.scale.y = 0.35; it.parts.water.position.y = -d.h * 0.32
+        it.spilled = 1; it.parts.water.scale.y = 0.35; it.parts.water.position.y = -d.h * (it.kind === 'goldfish' ? 0.22 : 0.32)
         Snd.sfx('splash'); ono(TT().spill, worldOf(it), 'blue', { size: 30 }); fx.burst(worldOf(it), { count: 26, color: 0x9fd3f0, speed: 2, life: 0.6, size: 0.12, gravity: 3 })
-        damage('tofu', it); custReact(S.lang === 'ja' ? '豆腐が…' : 'The tofu…')
+        damage('tofu', it); custReact(it.kind === 'goldfish' ? (S.lang === 'ja' ? '金魚が！' : 'My goldfish!') : (S.lang === 'ja' ? '豆腐が…' : 'The tofu…'))
       }
     }
   }
@@ -823,7 +929,7 @@ function updateGame(dt) {
     S.held.j.setTarget(pl.Vec2(clamp(wp.x, -6, 6), clamp(wp.y, -0.5, 6.5)))
   }
   PW.step(STEP, 8, 4)
-  if (S.thudQ) { Snd.sfx('thud', { v: clamp(S.thudQ / 6, 0.15, 1) }); S.thudQ = 0 }
+  if (S.squeakQ) { Snd.sfx('squeak'); S.squeakQ = false; S.thudQ = 0 } else if (S.thudQ) { Snd.sfx('thud', { v: clamp(S.thudQ / 6, 0.15, 1) }); S.thudQ = 0 }
   for (const it of S.items) judge(it, dt)
   // 床に落ちた物は消す
   for (const it of S.items) if (it.state === 'floor') { it.floorT += dt; if (it.floorT > 1.0) { if (it.body) { PW.destroyBody(it.body); it.body = null } it.g.removeFromParent(); it.state = 'gone' } }
@@ -843,6 +949,7 @@ function updateGame(dt) {
   // 圧（後ろの客のイライラ）
   S.P += difficultyRate() * dt
   Snd.tempo = 1 + clamp(S.P, 0, 1) * 0.25; Snd.tense = S.P > 0.75 ? 2 : S.P > 0.45 ? 1 : 0
+  updateOrderLine(dt)
   moodVoices(dt)
   if (S.P >= 1) complaint()
   updateMgr(dt)
@@ -884,6 +991,7 @@ function updateMgr(dt) {
   c.g.visible = MGR.stage > 0 || dist > 0.05
   c.mixer.update(dt)
   if (c.head) c.head.rotation.x += LOOKUP
+  setFace(c, MGR.stage >= 3 ? 'fury' : MGR.stage >= 2 ? 'angry' : 'stern')
   c.anger.visible = MGR.stage >= 2; headPos(c, _hp); c.anger.position.copy(_hp).add(_q.set(0.45, 0.25, 0)); c.anger.scale.setScalar(0.7 + Math.abs(Math.sin(S.time * 6)) * 0.15)
 }
 function gameOver() {
@@ -937,6 +1045,7 @@ function updateScene(dt) {
     }
   }
   updateOldBags(dt)
+  updateHands(dt)
 }
 
 // ---------- カメラ（画面の形に合わせて必要な物が全部入る距離）
@@ -1160,6 +1269,12 @@ window.BI = {
     counterScreen(i = 0) { const it = S.counter[i]; return it ? toScreen(it.g.position) : null },
     worldScreen(x, y, z = 0) { return toScreen(new THREE.Vector3(x, y, z)) },
     tut(n) { S.tut = n },
+    mood(k, expr) { const c = k === 'mgr' ? MGR.c : (S.cust.find(c => c.k === k) || {}).c; if (c) setFace(c, expr) },
+    faces() { return S.cust.filter(c => c.c).map(c => ({ k: c.k, name: c.c.name, expr: c.c.expr, face: !!c.c.face })) },
+    mgrExpr() { return MGR.c ? MGR.c.expr : null },
+    hands() { return HANDS.map(h => ({ gripping: h.grip > 0.8, x: +h.pos.x.toFixed(2), y: +h.pos.y.toFixed(2), z: +h.pos.z.toFixed(2) })) },
+    addCust(rareIdx) { const save = S.rand; if (rareIdx != null) { S.rand = () => 0; const cu = newCustomer(); S.rand = save; cu.rare = D.RARE[rareIdx]; cu.list = [...cu.rare.list]; const o = orderLine(cu.list, cu.rare); cu.line = o.line; cu.wish = o.wish; return cu.id } return newCustomer().id },
+    setFrontLine(kind) { const f = S.front; if (f) { f.line = { ja: IT[kind].say.ja, en: IT[kind].say.en }; f.wish = kind; f.sayT = 0 } },
     view(x, y = 0, z = 1) { S.viewOffX = x; S.viewOffY = y; S.viewZoom = z; if (!x) camera.clearViewOffset() },
     say(k, text, cls) { const c = k === 'mgr' ? MGR.c : (S.cust.find(c => c.k === k) || {}).c; if (c) bubble(c, text, cls, 99) },
     render() { render() },
@@ -1168,6 +1283,7 @@ window.BI = {
   state() {
     return {
       mode: S.mode, served: S.served, bags: S.bags, eggsSafe: S.eggsSafe, eggsTotal: S.eggsTotal, P: +S.P.toFixed(3), complaints: S.complaints, mgr: MGR.stage, dmg: { ...S.dmg },
+      front: S.front ? { wish: S.front.wish, hurt: S.front.hurt, line: S.front.line, list: S.front.list, rare: !!S.front.rare } : null,
       counter: S.counter.map(i => i.kind), held: S.held ? S.held.it.kind : null, cust: S.cust.map(c => ({ k: c.k, st: c.state, n: c.list.length, sp: c.spawned, has: !!c.c })),
       items: S.items.filter(i => i.body).map(i => { const p = i.body.getPosition(); return { kind: i.kind, x: +p.x.toFixed(2), y: +p.y.toFixed(2), a: +i.body.getAngle().toFixed(2), broken: i.broken, spilled: i.spilled, sq: i.sq, melt: +i.melt.toFixed(2), melted: i.melted, inBag: inBag(i), st: i.state } }),
     }

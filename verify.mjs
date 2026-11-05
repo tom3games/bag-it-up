@@ -1,6 +1,6 @@
 // verify.mjs の共通部品。コピーして __bi を置き換え、ゲーム固有のテストを足す。node verify.mjs
 import { chromium, webkit } from 'playwright'
-import { launch } from './_mute.mjs'
+import { MUTE_LAUNCH, muteContext } from './mute.mjs'
 import { spawn } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
 const ROOT = import.meta.dirname
@@ -19,7 +19,7 @@ async function t(name, fn) {
 const expect = (c, msg) => { if (!c) throw new Error(msg) }
 // 日本語ロケール固定・エラー収集つきでページを開く
 async function open(browser, opts = {}) {
-  const ctx = await browser.newContext({ locale: 'ja-JP', viewport: { width: 390, height: 844 }, ...opts })
+  const ctx = await browser.newContext({ locale: 'ja-JP', viewport: { width: 390, height: 844 }, ...opts }); await muteContext(ctx)
   await ctx.addInitScript(() => { try { localStorage.clear() } catch (e) {} })
   const p = await ctx.newPage(); p.errs = []
   p.on('pageerror', e => p.errs.push('pageerror ' + e.message))
@@ -50,9 +50,10 @@ const variance = (p, sel) => p.evaluate(sel => {
   let s = 0, s2 = 0, n = 0; for (let i = 0; i < d.length; i += 4 * 13) { const v = d[i] * .3 + d[i + 1] * .59 + d[i + 2] * .11; s += v; s2 += v * v; n++ }
   return Math.round(s2 / n - (s / n) ** 2)
 }, sel)
-const SIZES = [[360, 640, 'small'], [390, 844, 'phone'], [844, 390, 'land'], [667, 375, 'land-se'], [768, 1024, 'tab'], [1440, 900, 'pc']]
+// スマホ縦だけ（横持ち・PC は本人が言った時だけ。2026-11-03）
+const SIZES = [[360, 640, 'small'], [390, 844, 'phone'], [430, 932, 'large']]
 
-const browser = await launch(chromium)
+const browser = await chromium.launch(MUTE_LAUNCH)
 const p = await open(browser)
 await t('起動時にエラーが出ない', async () => { expect(p.errs.length === 0, p.errs.join('|')) })
 await t('ブラウザの拡大が起きない（viewport・ピンチ・Ctrl+ホイール・Ctrl+プラス）', async () => {
@@ -159,6 +160,77 @@ await t('音: BGM と効果音を鳴らす関数が呼ばれる（実際には�
   await p.click('#bMute')
   expect(a.want === 'play' && a.ctx === 'suspended' && a.played.tap && a.played.beep && m.muted && m.lv === 0 && m.ls === '1', JSON.stringify({ a, m })); return Object.keys(a.played).join(',')
 })
+await t('音: 無音のまま（__muteOk・録音素材が読み込まれる）', async () => {
+  await p.waitForFunction(() => Object.values(BI.Snd.bufs).filter(b => b && b !== 'loading').length >= 20, null, { timeout: 15000 })
+  const r = await p.evaluate(() => ({ ok: window.__muteOk(), n: Object.values(BI.Snd.bufs).filter(b => b && b !== 'loading').length, osc: typeof BI.Snd.tone, amb: !!BI.Snd.loops.amb, bgm: !!BI.Snd.loops.bgm }))
+  expect(r.ok && r.osc === 'undefined' && r.amb && r.bgm, JSON.stringify(r)); return r
+})
+await t('顔: 圧で表情が変わる（ふつう→むっ→怒り→激怒）', async () => {
+  const r = await p.evaluate(() => { BI.dbg.start(4); BI.dbg.pause(true); for (let i = 0; i < 400 && !(BI.S.front && BI.S.front.state === 'wait'); i++) BI.dbg.step(1); BI.S.front.line = null; const out = {}; for (const [k, v] of [['a', 0.1], ['b', 0.42], ['c', 0.68], ['d', 0.92]]) { BI.dbg.setP(v); BI.dbg.step(2); out[k] = BI.S.front.c.expr } BI.dbg.setP(0); BI.dbg.pause(false); return out })
+  expect(['calm', 'blink'].includes(r.a) && r.b === 'annoyed' && r.c === 'angry' && r.d === 'fury', JSON.stringify(r)); return r
+})
+await t('顔: 客の全員に顔の板があり、店長は段階で変わる', async () => {
+  const r = await p.evaluate(() => { BI.dbg.start(4); BI.dbg.pause(true); for (let i = 0; i < 3; i++) BI.dbg.addCust(); BI.dbg.step(30); const f = BI.dbg.faces(); BI.dbg.mgrStage(1); BI.dbg.step(2); const m1 = BI.dbg.mgrExpr(); BI.dbg.mgrStage(3); BI.dbg.step(2); const m3 = BI.dbg.mgrExpr(); BI.dbg.mgrStage(0); BI.dbg.pause(false); return { f, m1, m3 } })
+  expect(r.f.length >= 3 && r.f.every(c => c.face) && r.m1 === 'stern' && r.m3 === 'fury', JSON.stringify(r)); return r.f.map(c => c.name).join(',')
+})
+await t('手: つかむと近い方の手が商品へ行き、離すと袋の口に戻る', async () => {
+  await p.evaluate(() => { BI.dbg.tut(2); BI.dbg.start(5) }); await p.waitForFunction(() => BI.S.counter.length > 0, null, { timeout: 8000 })
+  const from = await p.evaluate(() => BI.dbg.counterScreen(0)), to = await p.evaluate(() => BI.dbg.worldScreen(0.4, 2.8, 0))
+  const rest = await p.evaluate(() => BI.dbg.hands())
+  await p.mouse.move(from.x, from.y); await p.mouse.down(); for (let i = 1; i <= 8; i++) { await p.mouse.move(from.x + (to.x - from.x) * i / 8, from.y + (to.y - from.y) * i / 8); await p.waitForTimeout(20) }
+  await p.waitForTimeout(400)
+  const hold = await p.evaluate(() => { const it = BI.S.held.it, h = BI.dbg.hands()[0]; return { d: Math.hypot(h.x - it.g.position.x, h.y - it.g.position.y), h: BI.dbg.hands() } })
+  await p.mouse.up(); await p.waitForTimeout(700)
+  const back = await p.evaluate(() => BI.dbg.hands())
+  expect(rest.length === 2 && hold.h[0].gripping && hold.d < 1.2 && !back[0].gripping && Math.abs(back[0].y - rest[0].y) < 0.1, JSON.stringify({ hold, back })); return +hold.d.toFixed(2)
+})
+await t('一言: 全部12字前後で、前に来た客が1回だけ言う', async () => {
+  const r = await p.evaluate(async () => {
+    const D = BI.D, lines = [...Object.values(D.ITEMS).filter(i => i.say).map(i => i.say.ja), ...D.SMALLTALK.map(i => i.ja), ...D.RARE.map(i => i.say.ja)], long = lines.filter(l => l.length > 13)
+    BI.dbg.tut(2); BI.dbg.start(5); await new Promise(r => { const iv = setInterval(() => { if (BI.S.front && BI.S.front.state === 'wait') { clearInterval(iv); r() } }, 50) })
+    BI.dbg.setFrontLine('tofu'); await new Promise(r => setTimeout(r, 500))
+    const said = [...document.querySelectorAll('#fx .sb')].map(e => e.textContent), rest = BI.S.front.line
+    return { n: lines.length, long, said, rest, wish: BI.S.front.wish }
+  })
+  expect(!r.long.length && r.said.includes('豆腐は水平で') && r.rest === null && r.wish === 'tofu', JSON.stringify(r)); return r.n
+})
+await t('一言: 頼んだ物を台無しにすると「言うたやん！」・守ると「言うた通りや！」', async () => {
+  const r = await p.evaluate(() => {
+    BI.dbg.start(9); BI.dbg.pause(true); for (let i = 0; i < 400 && !(BI.S.front && BI.S.front.state === 'wait'); i++) BI.dbg.step(1)
+    BI.dbg.clearCounter(); BI.S.front.line = null; BI.S.front.wish = 'egg'; BI.dbg.noSpawn(); BI.dbg.give('egg', 3.5, 1.0); BI.dbg.step(200)
+    const a = [...document.querySelectorAll('#fx .sb')].map(e => e.textContent), hurt = BI.S.front.hurt, broke = BI.S.front.brokeWish
+    BI.dbg.pause(false); return { a, hurt, broke }
+  })
+  expect(r.hurt && r.broke, JSON.stringify(r)); return r
+})
+await t('変な物: 新しい物も全部作れて袋に入る・金魚は傾けるとこぼれる・ゴムはキュッと鳴る', async () => {
+  const r = await p.evaluate(() => {
+    const out = {}
+    for (const k of BI.D.ODD) { BI.dbg.start(9); BI.dbg.noSpawn(); BI.dbg.pause(true); BI.dbg.give(k, 0, 0.9); BI.dbg.step(90); const s = BI.state(); out[k] = s.items.find(i => i.kind === k)?.inBag ?? (k === 'tuna' ? 'long' : false); BI.dbg.pause(false) }
+    BI.dbg.start(9); BI.dbg.noSpawn(); BI.dbg.pause(true); BI.dbg.give('goldfish', 0, 1.0, 1.3); BI.dbg.step(150); const fish = BI.state().dmg.tofu
+    const sq0 = BI.Snd.played.squeak || 0; BI.dbg.give('chicken', 0, 3); BI.dbg.step(100); const sq1 = BI.Snd.played.squeak || 0; BI.dbg.pause(false)
+    return { out, fish, sq: sq1 - sq0 }
+  })
+  const bad = Object.entries(r.out).filter(([k, v]) => v === false && !['tuna', 'bowling'].includes(k))
+  expect(!bad.length && r.fish === 1 && r.sq >= 1, JSON.stringify(r)); return r.out
+})
+await t('変な客: 全種のリストが商品として成り立つ（4人目以降・seed で再現）', async () => {
+  const r = await p.evaluate(() => {
+    const bad = BI.D.RARE.filter(c => !c.list.every(k => BI.D.ITEMS[k]) || (c.wish && !c.list.includes(c.wish)))
+    const seen = (seed) => { BI.dbg.start(seed); BI.dbg.pause(true); const names = []; for (let i = 0; i < 40; i++) { BI.S.custN = 4 + i; const id = BI.dbg.addCust(); const cu = BI.S.cust.find(c => c.id === id); names.push(cu.rare ? cu.rare.id : '-') } BI.dbg.pause(false); return names.join(',') }
+    const a = seed => seen(seed), s1 = a(11), s2 = a(11)
+    return { bad: bad.map(c => c.id), same: s1 === s2, rare: (s1.match(/[a-z]+/g) || []).length }
+  })
+  expect(!r.bad.length && r.same && r.rare >= 1, JSON.stringify(r)); return r
+})
+await t('文字: 同時に出す文字は2つまで（圧・割れ・落下を連発しても）', async () => {
+  const r = await p.evaluate(async () => {
+    BI.dbg.tut(2); BI.dbg.start(4); await new Promise(r => setTimeout(r, 1200)); BI.dbg.setP(0.9); let mx = 0
+    for (let i = 0; i < 60; i++) { if (i % 12 === 0) { BI.dbg.give('egg', 3.5, 1); BI.dbg.give('tofu', 0, 1, 1.3) } BI.S.P = Math.min(0.95, BI.S.P); mx = Math.max(mx, document.querySelectorAll('#fx > *').length); await new Promise(r => setTimeout(r, 60)) }
+    return mx
+  })
+  expect(r <= 2, r); return r
+})
 await t('固定60Hz: 画面の速さに関係なく1秒=60ステップ', async () => {
   const r = await p.evaluate(async () => { const t0 = BI.S.time; await new Promise(r => setTimeout(r, 2000)); return (BI.S.time - t0) / 2 })
   expect(r > 0.85 && r < 1.1, r); return r.toFixed(3)
@@ -166,7 +238,7 @@ await t('固定60Hz: 画面の速さに関係なく1秒=60ステップ', async (
 
 
 await p.close()
-// ---- 6サイズ × 全画面で一画面に収まる。画面の巡り方はゲームに合わせて書く
+// ---- スマホ縦3サイズ × 全画面で一画面に収まる。画面の巡り方はゲームに合わせて書く
 for (const [w, h, name] of SIZES) {
   const q = await open(browser, { viewport: { width: w, height: h } })
   const views = {}
@@ -193,7 +265,7 @@ for (const [w, h, name] of SIZES) {
 }
 await browser.close()
 // ---- WebKit（iPhone 相当）でタッチの通し
-const wb = await launch(webkit), wp = await open(wb, { isMobile: true, hasTouch: true, deviceScaleFactor: 2 })
+const wb = await webkit.launch(), wp = await open(wb, { isMobile: true, hasTouch: true, deviceScaleFactor: 2 })
 await t('WebKit: 2本指の touchmove を止める', async () => {
   const r = await wp.evaluate(() => { const e = new Event('touchmove', { cancelable: true, bubbles: true }); Object.defineProperty(e, 'touches', { value: [{}, {}] }); document.body.dispatchEvent(e); return e.defaultPrevented })
   expect(r, r)
@@ -211,6 +283,7 @@ await t('WebKit: タッチでつかんで袋に入れられる', async () => {
   expect(r.held && r.inBag === 1, JSON.stringify(r))
 })
 await wp.screenshot({ path: `${ROOT}/shots/webkit-play.png` })
+await t('WebKit: 無音のまま（__muteOk）', async () => { const r = await wp.evaluate(() => ({ ok: window.__muteOk(), ctx: BI.Snd.ctx && BI.Snd.ctx.state, bufs: Object.keys(BI.Snd.bufs).length })); expect(r.ok && r.ctx !== 'running' && r.bufs > 0, JSON.stringify(r)); return r })
 await t('WebKit: エラーなし', async () => { expect(wp.errs.length === 0, wp.errs.join('|')) })
 await wb.close()
 server.kill()

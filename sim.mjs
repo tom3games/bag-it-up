@@ -1,7 +1,7 @@
 // 物理の判定を数値で見る（別窓で PORT=5425 node server.mjs を立ててから node sim.mjs）
 import { chromium } from 'playwright'
-import { launch } from './_mute.mjs'
-const b = await launch(chromium), p = await b.newPage({ viewport: { width: 390, height: 844 }, locale: 'ja-JP' })
+import { MUTE_LAUNCH, muteContext } from './mute.mjs'
+const b = await chromium.launch(MUTE_LAUNCH), ctx = await b.newContext({ viewport: { width: 390, height: 844 }, locale: 'ja-JP' }); await muteContext(ctx); const p = await ctx.newPage()
 const errs = []; p.on('pageerror', e => errs.push(e.message))
 await p.goto('http://localhost:5425/'); await p.waitForFunction(() => window.__biReady && BI.charsReady)
 const cases = [

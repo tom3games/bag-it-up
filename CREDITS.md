@@ -1,0 +1,40 @@
+- snd/tap.mp3: Interface Sounds / Kenney / CC0
+- snd/beep.mp3: Interface Sounds / Kenney / CC0
+- snd/grab1.mp3: Cereal raisin bran / chocoholic / Public domain
+- snd/grab2.mp3: 50 RPG sound effects / Kenney / CC0
+- snd/grab3.mp3: 50 RPG sound effects / Kenney / CC0
+- snd/thud1.mp3: 75 CC0 breaking / falling / hit sfx / rubberduck / CC0
+- snd/thud2.mp3: 75 CC0 breaking / falling / hit sfx / rubberduck / CC0
+- snd/thud3.mp3: 100 CC0 SFX #2 / rubberduck / CC0
+- snd/crack1.mp3: Fly swatter squish sound / qubodup / CC0
+- snd/crack2.mp3: Fly swatter squish sound / qubodup / CC0
+- snd/crack3.mp3: Fly swatter squish sound / qubodup / CC0
+- snd/shell.mp3: 75 CC0 breaking / falling / hit sfx / rubberduck / CC0
+- snd/splash1.mp3: 100 CC0 SFX / rubberduck / CC0
+- snd/splash2.mp3: 100 CC0 SFX / rubberduck / CC0
+- snd/melt1.mp3: 100 CC0 SFX / rubberduck / CC0
+- snd/melt2.mp3: 100 CC0 SFX / rubberduck / CC0
+- snd/drop1.mp3: 75 CC0 breaking / falling / hit sfx / rubberduck / CC0
+- snd/drop2.mp3: 75 CC0 breaking / falling / hit sfx / rubberduck / CC0
+- snd/done.mp3: Cash register / commons user (self) / Public domain
+- snd/bag1.mp3: Cereal raisin bran / chocoholic / Public domain
+- snd/bag2.mp3: Cereal raisin bran / chocoholic / Public domain
+- snd/bag3.mp3: Cereal raisin bran / chocoholic / Public domain
+- snd/sigh1.mp3: 100 CC0 SFX #2 / rubberduck / CC0
+- snd/sigh2.mp3: 100 CC0 SFX #2 / rubberduck / CC0
+- snd/grunt1.mp3: Little Grunts / crueltyinc / CC0
+- snd/grunt2.mp3: Little Grunts / crueltyinc / CC0
+- snd/grunt3.mp3: Little Grunts / crueltyinc / CC0
+- snd/foot1.mp3: 50 RPG sound effects / Kenney / CC0
+- snd/foot2.mp3: 50 RPG sound effects / Kenney / CC0
+- snd/foot3.mp3: 50 RPG sound effects / Kenney / CC0
+- snd/over.mp3: 85 Short music jingles / Kenney / CC0
+- snd/stamp.mp3: 75 CC0 breaking / falling / hit sfx / rubberduck / CC0
+- snd/boing1.mp3: 100 CC0 SFX / rubberduck / CC0
+- snd/boing2.mp3: 100 CC0 SFX / rubberduck / CC0
+- snd/squeak1.mp3: Squeak toy sounds / bart / CC0
+- snd/squeak2.mp3: Squeak toy sounds / bart / CC0
+- snd/squeak3.mp3: Squeak toy sounds / bart / CC0
+- snd/bgm_title.mp3: quirky vendor / Bobjt / CC-BY 3.0,CC0
+- snd/bgm_play.mp3: Bossa Shop Theme, in Low-Fi and HD / SpringySpringo / CC-BY 3.0,CC0
+- snd/amb_fridge.mp3: 100 CC0 SFX #2 / rubberduck / CC0
