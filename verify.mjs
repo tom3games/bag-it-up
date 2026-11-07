@@ -1,4 +1,5 @@
 // verify.mjs の共通部品。コピーして __bi を置き換え、ゲーム固有のテストを足す。node verify.mjs
+import './mute-auto.mjs'  // テスト中は絶対に音を出さない（playwright を無音に差し替え）
 import { chromium, webkit } from 'playwright'
 import { MUTE_LAUNCH, muteContext } from './mute.mjs'
 import { spawn } from 'node:child_process'

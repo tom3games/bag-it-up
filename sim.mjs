@@ -1,4 +1,5 @@
 // 物理の判定を数値で見る（別窓で PORT=5425 node server.mjs を立ててから node sim.mjs）
+import './mute-auto.mjs'  // テスト中は絶対に音を出さない（playwright を無音に差し替え）
 import { chromium } from 'playwright'
 import { MUTE_LAUNCH, muteContext } from './mute.mjs'
 const b = await chromium.launch(MUTE_LAUNCH), ctx = await b.newContext({ viewport: { width: 390, height: 844 }, locale: 'ja-JP' }); await muteContext(ctx); const p = await ctx.newPage()
