@@ -3,8 +3,8 @@
 (function () {
   var URL = 'https://ofuse.me/ktomo_dev'
   var script = document.currentScript
-  var ja = '作者に' + script.getAttribute('data-ja') + 'をおごる（任意）'
-  var en = 'Buy the dev ' + script.getAttribute('data-en') + ' (optional)'
+  var ja = '作者に' + script.getAttribute('data-ja') + 'をおごる'
+  var en = 'Buy the dev ' + script.getAttribute('data-en')
   var again = document.getElementById('bAgain') || document.getElementById('btnAgain')
   if (!again || document.getElementById('tmSupport')) return
 
