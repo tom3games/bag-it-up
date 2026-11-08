@@ -1,4 +1,4 @@
-// 任意の支援リンク。結果画面の「もう一回」のある所に1本だけ足す
+// 支援リンクと、ポータル（ひまつぶし横丁）へ戻る文字リンク。結果画面の「もう一回」のある所に足す
 // 使い方: </body> の直前に <script src="support.js?v=1" data-ja="肉まん" data-en="a pork bun"></script>
 (function () {
   var URL = 'https://ofuse.me/ktomo_dev'
@@ -18,8 +18,15 @@
   var ico = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" style="flex:none"><g fill="none" stroke="#E8C26A" stroke-width="1.4" stroke-linejoin="round"><rect x="2" y="6.5" width="12" height="7.5" rx="1"/><path d="M1.5 4.5h13v2h-13zM8 4.5v9.5"/><path d="M8 4.5C6.6 2 4.4 2.2 4.6 3.6 4.8 4.6 8 4.5 8 4.5zM8 4.5c1.4-2.5 3.6-2.3 3.4-.9C11.2 4.6 8 4.5 8 4.5z"/></g></svg>'
   var label = document.createElement('span')
   a.innerHTML = ico; a.appendChild(label)
+
+  // 2026-11-09 ポータル公開: 支援より控えめな文字リンク。同じタブで横丁のトップへ
+  var home = document.createElement('a')
+  home.id = 'tmHome'
+  home.href = 'https://tom3games.com/'
+  home.target = '_top'
+  home.style.cssText = 'display:block;align-self:center;flex:none;width:fit-content;max-width:100%;margin:2px auto 0;padding:4px 12px;border-radius:99px;background:rgba(18,16,14,.5);color:#F4EEE2;font-family:inherit;font-size:12px;font-weight:600;line-height:1.3;text-align:center;text-decoration:underline;text-underline-offset:3px;position:relative;z-index:2;pointer-events:auto;opacity:0;transition:opacity .5s ease .5s'
   function show() {
-    function on() { a.style.opacity = '1'; a.style.transform = 'none' }
+    function on() { a.style.opacity = '1'; a.style.transform = 'none'; home.style.opacity = '.92' }
     if (!('IntersectionObserver' in window)) return on()
     // 結果画面が開いて見えた時に1回だけ
     var io = new IntersectionObserver(function (es) { if (es.some(function (e) { return e.isIntersecting })) { io.disconnect(); requestAnimationFrame(on) } })
@@ -27,7 +34,11 @@
     setTimeout(on, 8000)   // 見えないまま判定が来ない時の保険（透明のまま残さない）
   }
 
-  function setText() { label.textContent = /[ぁ-んァ-ヶ一-龠]/.test(again.textContent) || !again.textContent.trim() ? ja : en }
+  function setText() {
+    var jp = /[ぁ-んァ-ヶ一-龠]/.test(again.textContent) || !again.textContent.trim()
+    label.textContent = jp ? ja : en
+    home.textContent = jp ? 'ひまつぶし横丁へ戻る' : 'Back to Himatsubushi Yokocho'
+  }
   setText()
   new MutationObserver(setText).observe(again, { childList: true, characterData: true, subtree: true })
 
@@ -37,5 +48,9 @@
   var count = row.querySelectorAll(':scope > button, :scope > a').length
   if (row === view || count >= 3) row.appendChild(a)
   else row.parentElement.appendChild(a)
+  // 結果画面が詰まっているゲームは、置き場所を data-home-slot で指定できる（足元の小さな文字の列など）
+  var slot = document.querySelector('[data-home-slot]')
+  if (slot) { home.style.margin = '0'; home.style.padding = '2px 10px'; slot.appendChild(home) }
+  else a.parentElement.insertBefore(home, a.nextSibling)
   show()
 })()
