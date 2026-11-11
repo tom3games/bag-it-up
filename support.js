@@ -1,5 +1,30 @@
 // 支援リンクと、ポータル（ひまつぶし横丁）へ戻る文字リンク。結果画面の「もう一回」のある所に足す
 // 使い方: </body> の直前に <script src="support.js?v=1" data-ja="肉まん" data-en="a pork bun"></script>
+// 2026-11-11 X（旧Twitter）のアプリの中のブラウザは、画面の下に自分のバー（× と URL の帯、ポストの操作の列）を
+// ページの上に重ねて描く。safe-area も高さも教えてくれないので、X の中と分かった時だけ
+// <html class="inapp-x"> と --inapp-bot（下に逃がす高さ）を付ける。各ゲームは下に貼り付く所に var(--inapp-bot,0px) を足す。
+// 見分け方: UA に Twitter（Android の TwitterAndroid、昔の iOS の "Twitter for iPhone"）／iOS で t.co・x.com から来た。
+// 一度分かったらタブの間は覚える（もう一回・再読み込みで referrer が消えても効くように）。試験用に ?inapp=x / ?inapp=0
+;(function () {
+  var KEY = 'tm_inapp', BOT = '52px'
+  var de = document.documentElement, ua = navigator.userAgent || '', on = null
+  function store(v) { try { sessionStorage.setItem(KEY, v) } catch (e) {} }
+  var m = /[?&]inapp=(x|0)(?:&|$)/.exec(location.search)
+  if (m) { on = m[1] === 'x'; store(on ? 'x' : '0') }
+  if (on === null) { try { var s = sessionStorage.getItem(KEY); if (s) on = s === 'x' } catch (e) {} }
+  if (on === null) {
+    var ios = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+    var other = /CriOS|FxiOS|EdgiOS|OPiOS|Line\/|FBAN|FBAV|Instagram|MicroMessenger/i.test(ua)
+    var ref = ''
+    try { ref = document.referrer ? new URL(document.referrer).hostname : '' } catch (e) {}
+    on = /\bTwitter/i.test(ua) || (ios && !other && /^(t\.co|(mobile\.)?(x|twitter)\.com)$/.test(ref))
+    if (on) store('x')
+  }
+  if (!on) return
+  de.classList.add('inapp-x')
+  de.style.setProperty('--inapp-bot', BOT)
+})();
+
 (function () {
   var URL = 'https://ofuse.me/ktomo_dev'
   var script = document.currentScript
