@@ -8,7 +8,9 @@ const ROOT = import.meta.dirname
 mkdirSync(ROOT + '/shots', { recursive: true })
 const PORT = Number(process.env.VPORT || 5421)
 const server = spawn(process.execPath, ['server.mjs'], { cwd: ROOT, env: { ...process.env, PORT: String(PORT) } })
-await new Promise(r => setTimeout(r, 400))
+process.on('exit', () => server.kill())   // 途中で落ちても確認用サーバーを残さない（次の回がポートを握られる）
+// サーバーが応答するまで待つ（固定 400ms だと負荷で間に合わない）
+for (let i = 0; i < 100; i++) { try { await fetch(`http://localhost:${PORT}/`); break } catch (e) { await new Promise(r => setTimeout(r, 100)) } }
 const URL0 = `http://localhost:${PORT}/`
 let pass = 0, fail = 0
 const results = []
@@ -26,7 +28,8 @@ async function open(browser, opts = {}) {
   p.on('pageerror', e => p.errs.push('pageerror ' + e.message))
   p.on('console', m => { if (m.type() === 'error') p.errs.push('console ' + m.text()) })
   p.on('requestfailed', r => { if (!/fonts\.(googleapis|gstatic)/.test(r.url())) p.errs.push('reqfail ' + r.url()) })
-  await p.goto(URL0); await p.waitForFunction(() => window.__biReady && window.BI && window.BI.charsReady, null, { timeout: 10000 })
+  // 負荷が高いと load まで30秒を超えることがある。DOM ができたら進み、準備完了は長めに条件待ち
+  await p.goto(URL0, { waitUntil: 'domcontentloaded', timeout: 180000 }); await p.waitForFunction(() => window.__biReady && window.BI && window.BI.charsReady, null, { timeout: 120000 })
   return p
 }
 // 横のはみ出し
@@ -94,11 +97,11 @@ await t('説明は3行・遊び方画面が開いて戻れる', async () => {
 await t('遊びの通し: ドラッグで詰めて2人さばける', async () => {
   await p.evaluate(() => { BI.dbg.tut(2); BI.dbg.start(5) })
   for (let i = 0; i < 12; i++) {
-    await p.waitForFunction(() => BI.S.counter.length > 0 || BI.S.served >= 2, null, { timeout: 8000 })
+    await p.waitForFunction(() => BI.S.counter.length > 0 || BI.S.served >= 2, null, { timeout: 30000 })
     if (await p.evaluate(() => BI.S.served >= 2)) break
     await bagOne(p, (i % 3 - 1) * 0.5)
   }
-  await p.waitForFunction(() => BI.S.served >= 2, null, { timeout: 8000 })
+  await p.waitForFunction(() => BI.S.served >= 2, null, { timeout: 30000 })
   const s = await p.evaluate(() => BI.state()); expect(s.served >= 2 && s.bags >= 2 && s.eggsSafe > 0, JSON.stringify(s)); return { served: s.served, bags: s.bags, eggs: s.eggsSafe, P: s.P }
 })
 await t('チュートリアル: 初回だけ指の案内が出て、1個入れたら消える', async () => {
@@ -133,14 +136,15 @@ await t('ゲージなし: 圧は客の態度で出る（足踏み→ため息→
 await t('3回クレームで店長に呼ばれて結果へ（点・客数・卵が出る）', async () => {
   await p.evaluate(() => { BI.dbg.start(4); BI.S.served = 7; BI.S.bags = 8; BI.S.eggsSafe = 11; BI.S.eggsTotal = 18; BI.dbg.complaint(); BI.dbg.complaint() })
   const mg = await p.evaluate(() => BI.state().mgr)
-  await p.evaluate(() => BI.dbg.complaint())
-  await p.waitForFunction(() => BI.S.mode === 'result', null, { timeout: 8000 })
-  await p.waitForTimeout(3000)
+  // 店長に呼ばれる演出と結果の数え上げは実時間で待つと負荷で8秒を超える。時間を止めてコマで進める
+  await p.evaluate(() => { BI.dbg.complaint(); BI.dbg.pause(true); for (let i = 0; i < 60 * 30 && BI.S.mode !== 'result'; i++) BI.dbg.step(1) })
+  expect(await p.evaluate(() => BI.S.mode === 'result'), 'no result')
+  await p.evaluate(() => { BI.dbg.step(60 * 3); BI.dbg.pause(false) })
   const r = await p.evaluate(() => ({ score: document.getElementById('rScore').textContent, rank: document.getElementById('rRank').textContent, nums: document.getElementById('rNums').textContent, res: BI.S.result }))
   expect(mg === 2 && r.res.score === 7 * 100 + 8 * 30 + 11 * 25 && r.score === String(r.res.score) && /7/.test(r.nums) && /11\/18/.test(r.nums), JSON.stringify(r)); return r.score + ' ' + r.rank
 })
 await t('結果: 画像の保存（1080x1080 の PNG）', async () => {
-  const dl = p.waitForEvent('download', { timeout: 8000 }).catch(e => null); await p.click('#bSave', { timeout: 5000 }); const d = await dl; expect(d, 'no download')
+  const dl = p.waitForEvent('download', { timeout: 30000 }).catch(e => null); await p.click('#bSave', { timeout: 5000 }); const d = await dl; expect(d, 'no download')
   const ok = await p.evaluate(() => { const c = BI.drawCard(); return [c.width, c.height] })
   expect(/bag-it-up-\d+\.png/.test(d.suggestedFilename()) && ok[0] === 1080, d.suggestedFilename())
 })
@@ -148,7 +152,7 @@ await t('結果: X でポスト（intent・本文に結果とハッシュタグ�
   const x = await p.evaluate(() => BI.xPost())
   const u = new URL(x.href)
   expect(u.origin + u.pathname === 'https://x.com/intent/post' && /#袋詰め職人/.test(u.searchParams.get('text')) && /7人/.test(u.searchParams.get('text')) && u.searchParams.get('url') === 'https://tom3games.github.io/bag-it-up/', x.href)
-  const [pop] = await Promise.all([p.waitForEvent('popup', { timeout: 8000 }), p.click('#bX', { timeout: 5000 })]); await pop.close()
+  const [pop] = await Promise.all([p.waitForEvent('popup', { timeout: 30000 }), p.click('#bX', { timeout: 5000 })]); await pop.close()
 })
 await t('英語に切り替わる（結果・ボタン・共有文）', async () => {
   await p.click('#bLang'); const r = await p.evaluate(() => ({ btn: document.getElementById('bAgain').textContent, rank: document.getElementById('rRank').textContent, share: BI.xPost().text, lang: document.documentElement.lang }))
@@ -175,7 +179,7 @@ await t('顔: 客の全員に顔の板があり、店長は段階で変わる', 
   expect(r.f.length >= 3 && r.f.every(c => c.face) && r.m1 === 'stern' && r.m3 === 'fury', JSON.stringify(r)); return r.f.map(c => c.name).join(',')
 })
 await t('手: つかむと近い方の手が商品へ行き、離すと袋の口に戻る', async () => {
-  await p.evaluate(() => { BI.dbg.tut(2); BI.dbg.start(5) }); await p.waitForFunction(() => BI.S.counter.length > 0, null, { timeout: 8000 })
+  await p.evaluate(() => { BI.dbg.tut(2); BI.dbg.start(5) }); await p.waitForFunction(() => BI.S.counter.length > 0, null, { timeout: 30000 })
   const from = await p.evaluate(() => BI.dbg.counterScreen(0)), to = await p.evaluate(() => BI.dbg.worldScreen(0.4, 2.8, 0))
   const rest = await p.evaluate(() => BI.dbg.hands())
   await p.mouse.move(from.x, from.y); await p.mouse.down(); for (let i = 1; i <= 8; i++) { await p.mouse.move(from.x + (to.x - from.x) * i / 8, from.y + (to.y - from.y) * i / 8); await p.waitForTimeout(20) }
@@ -233,8 +237,29 @@ await t('文字: 同時に出す文字は2つまで（圧・割れ・落下を�
   expect(r <= 2, r); return r
 })
 await t('固定60Hz: 画面の速さに関係なく1秒=60ステップ', async () => {
-  const r = await p.evaluate(async () => { const t0 = BI.S.time; await new Promise(r => setTimeout(r, 2000)); return (BI.S.time - t0) / 2 })
-  expect(r > 0.85 && r < 1.1, r); return r.toFixed(3)
+  // 実時間で2秒待つと、負荷でコマが遅れた分（1コマ最大8ステップの上限）だけ進みが減って落ちる。
+  // 時計とコマを差し替えて 30/60/120/144Hz で仮想2秒ずつ回し、どの速さでも 1秒=60ステップかを見る
+  const r = await p.evaluate(async () => {
+    const realRaf = window.requestAnimationFrame.bind(window), realNow = performance.now.bind(performance)
+    // 仮想のコマの間は描画を止める（数百コマを一気に描くと GPU 側に溜まり、後でページを閉じるのに数分かかった）
+    const cv = document.getElementById('gl'), gls = [cv.getContext('webgl2') || cv.getContext('webgl')].filter(Boolean), DRAW = ['drawElements', 'drawArrays', 'drawElementsInstanced', 'drawArraysInstanced', 'clear']
+    for (const gl of gls) for (const k of DRAW) if (gl[k]) gl[k] = () => {}
+    let fake = realNow(), cbs = []
+    window.requestAnimationFrame = cb => { cbs.push(cb); return 1 }
+    performance.now = () => fake
+    await new Promise(r => realRaf(() => realRaf(() => realRaf(r))))
+    const out = {}
+    for (const hz of [30, 60, 120, 144]) {
+      const t0 = BI.S.time
+      for (let i = 0; i < hz * 2; i++) { fake += 1000 / hz; const c = cbs; cbs = []; c.forEach(f => f(fake)) }
+      out[hz] = +((BI.S.time - t0) / 2).toFixed(3)
+    }
+    const off = fake - realNow(); performance.now = () => realNow() + off
+    window.requestAnimationFrame = realRaf; cbs.forEach(f => realRaf(f))
+    for (const gl of gls) for (const k of DRAW) delete gl[k]
+    return out
+  })
+  expect(Object.values(r).every(v => v > 0.97 && v < 1.03), r); return r
 })
 
 
@@ -249,7 +274,7 @@ for (const [w, h, name] of SIZES) {
   await q.click('#bHow'); views.how = await fit(q); await q.screenshot({ path: `${ROOT}/shots/fit-${name}-how.png` }); await q.click('#bHowBack')
   await q.evaluate(() => { BI.dbg.start(5); BI.dbg.pause(true); BI.dbg.setList(['egg', 'bottle', 'tofu', 'gyoza']); BI.S.front && (BI.S.front.state = 'wait') })
   await q.evaluate(() => { for (const k of ['egg', 'bottle', 'tofu', 'gyoza']) { BI.S.counter.length < 9 } BI.dbg.pause(false) })
-  await q.waitForFunction(() => BI.S.counter.length >= 3, null, { timeout: 8000 }).catch(() => {})
+  await q.waitForFunction(() => BI.S.counter.length >= 3, null, { timeout: 30000 }).catch(() => {})
   await q.evaluate(() => { BI.dbg.give('bottle', -0.5, 0.4, 1.57); BI.dbg.give('cabbage', 0.6, 0.6); BI.dbg.give('egg', 0, 1.6); BI.dbg.setP(0.7) })
   await q.waitForTimeout(2200)
   views.play = await fit(q); await q.screenshot({ path: `${ROOT}/shots/fit-${name}-play.png` })
@@ -272,7 +297,7 @@ await t('WebKit: 2本指の touchmove を止める', async () => {
   expect(r, r)
 })
 await t('WebKit: タッチでつかんで袋に入れられる', async () => {
-  await wp.evaluate(() => { BI.dbg.tut(2); BI.dbg.start(5) }); await wp.waitForFunction(() => BI.S.counter.length > 0, null, { timeout: 8000 })
+  await wp.evaluate(() => { BI.dbg.tut(2); BI.dbg.start(5) }); await wp.waitForFunction(() => BI.S.counter.length > 0, null, { timeout: 30000 })
   const r = await wp.evaluate(async () => {
     const c = document.getElementById('gl'), a = BI.dbg.counterScreen(0), b = BI.dbg.worldScreen(0, 2.5, 0)
     const ev = (type, x, y, tgt) => (tgt || window).dispatchEvent(new PointerEvent(type, { pointerId: 7, pointerType: 'touch', isPrimary: true, clientX: x, clientY: y, bubbles: true, cancelable: true }))
