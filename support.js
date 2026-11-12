@@ -20,9 +20,29 @@
     on = /\bTwitter/i.test(ua) || (ios && !other && /^(t\.co|(mobile\.)?(x|twitter)\.com)$/.test(ref))
     if (on) store('x')
   }
-  if (!on) return
-  de.classList.add('inapp-x')
-  de.style.setProperty('--inapp-bot', BOT)
+  if (on) de.classList.add('inapp-x')
+  // 2026-11-12 X の別の形（上に帯・下に戻る/共有の列）では、100svh が見えている高さより大きく出て、
+  // 画面の下に置いたボタン（開始など）が見えなくなった。100svh と実際の高さ（innerHeight）の差を測り、
+  // 差がある時だけその分も --inapp-bot に足す。ふつうのブラウザでは差は0なので何も変わらない。
+  var sent = false
+  function apply() {
+    var diff = 0
+    try {
+      var p = document.createElement('div')
+      p.style.cssText = 'position:fixed;left:-10px;top:0;width:1px;height:100svh;visibility:hidden;pointer-events:none'
+      ;(document.body || de).appendChild(p)
+      diff = Math.round(p.getBoundingClientRect().height - window.innerHeight)
+      p.parentNode.removeChild(p)
+    } catch (e) {}
+    if (!(diff >= 2 && diff <= 400)) diff = 0
+    var px = (on ? parseInt(BOT, 10) : 0) + diff
+    if (px) de.style.setProperty('--inapp-bot', px + 'px'); else de.style.removeProperty('--inapp-bot')
+    // どのブラウザでずれが出るかを後で見るため、ずれた時だけ計測に1回送る
+    if (diff && !sent && window.dataLayer) { sent = true; try { window.dataLayer.push(['event', 'vh_short', { diff: diff, inapp: on ? 1 : 0, ih: window.innerHeight }]) } catch (e) {} }
+  }
+  apply()
+  window.addEventListener('resize', apply)
+  window.addEventListener('orientationchange', function () { setTimeout(apply, 300) })
 })();
 
 (function () {
